@@ -1,11 +1,11 @@
 # 🎸 Music Organizer
 
-Automatically organize your MP3 library using **MusicBrainz** metadata lookup and **AcoustID** audio fingerprinting.
+Automatically organize your MP3 library by fetching metadata from online databases and audio fingerprinting.
 
 ## Features
 
-- 🔍 Looks up tags via MusicBrainz API
-- 🎵 Falls back to AcoustID audio fingerprinting (fpcalc)
+- 🔍 Looks up and enriches track metadata automatically
+- 🎵 Falls back to audio fingerprinting for untagged files
 - ⬇️ **Auto-installs fpcalc** if missing (with progress bar in GUI and CLI)
 - 🔀 Merges duplicate album folders after organizing
 - 🗓️ Always picks the oldest/original release year
