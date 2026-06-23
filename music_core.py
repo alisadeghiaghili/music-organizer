@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """music_core.py — shared logic for Music Organizer (GUI + CLI)"""
 
-import os, re, time, shutil, json, subprocess, urllib.request, urllib.parse
+import os, re, sys, time, shutil, json, subprocess, urllib.request, urllib.parse
 from pathlib import Path
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TPE2, ID3NoHeaderError
 
 MB_BASE  = "https://musicbrainz.org/ws/2"
-HEADERS  = {"User-Agent": "MusicOrganizer/1.0 (github.com/user/music-organizer)"}
+HEADERS  = {"User-Agent": "MusicOrganizer/1.0 (github.com/alisadeghiaghili/music-organizer)"}
 _last_mb = 0.0
+
 
 def mb_get(endpoint, params):
     global _last_mb
     gap = 1.1 - (time.time() - _last_mb)
-    if gap > 0: time.sleep(gap)
+    if gap > 0:
+        time.sleep(gap)
     url = f"{MB_BASE}/{endpoint}?" + urllib.parse.urlencode({**params, "fmt": "json"})
     req = urllib.request.Request(url, headers=HEADERS)
     try:
@@ -23,9 +25,9 @@ def mb_get(endpoint, params):
         _last_mb = time.time()
         return None
 
+
 def _best_release(releases):
-    best = None
-    best_year = 9999
+    best, best_year = None, 9999
     for rel in releases:
         date = rel.get("date", "")
         year = int(date[:4]) if date and date[:4].isdigit() else 9999
@@ -34,14 +36,17 @@ def _best_release(releases):
             best = rel
     return best, best_year
 
+
 def search_mb(artist, title, album=""):
     parts = []
     if title:  parts.append(f'recording:"{title}"')
     if artist: parts.append(f'artistname:"{artist}"')
     if album:  parts.append(f'release:"{album}"')
-    if not parts: return None
+    if not parts:
+        return None
     data = mb_get("recording", {"query": " AND ".join(parts), "limit": 5})
-    if not data or not data.get("recordings"): return None
+    if not data or not data.get("recordings"):
+        return None
     rec = data["recordings"][0]
     result = {
         "title":  rec.get("title", ""),
@@ -61,32 +66,54 @@ def search_mb(artist, title, album=""):
             result["disc"]  = str(media[0].get("position", "")) if len(media) > 1 else ""
     return result
 
+
+def _exe_dir():
+    """
+    Returns the directory that contains the running exe or script.
+    Handles PyInstaller onefile correctly via sys.frozen + sys.executable.
+    """
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent.resolve()
+    return Path(__file__).parent.resolve()
+
+
 def find_fpcalc():
-    local = Path(__file__).parent / ("fpcalc.exe" if os.name == "nt" else "fpcalc")
+    fname = "fpcalc.exe" if os.name == "nt" else "fpcalc"
+    # 1. next to the exe / script
+    local = _exe_dir() / fname
     if local.exists():
         return str(local)
+    # 2. in PATH
     return shutil.which("fpcalc")
+
 
 def acoustid_lookup(filepath, api_key="8XaBELgH"):
     fpcalc = find_fpcalc()
-    if not fpcalc: return None
+    if not fpcalc:
+        return None
     try:
-        r = subprocess.run([fpcalc, "-json", filepath],
-                           capture_output=True, text=True, timeout=30)
+        r = subprocess.run(
+            [fpcalc, "-json", filepath],
+            capture_output=True, text=True, timeout=30
+        )
         fp = json.loads(r.stdout)
-    except Exception: return None
+    except Exception:
+        return None
     url = (
         f"https://api.acoustid.org/v2/lookup?client={api_key}"
-        f"&duration={int(fp.get('duration',0))}&fingerprint={fp.get('fingerprint','')}"
+        f"&duration={int(fp.get('duration', 0))}"
+        f"&fingerprint={fp.get('fingerprint', '')}"
         "&meta=recordings+releases+tracks+releasegroups"
     )
     try:
         req = urllib.request.Request(url, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=10) as r:
             data = json.loads(r.read().decode())
-    except Exception: return None
+    except Exception:
+        return None
     results = data.get("results", [])
-    if not results or not results[0].get("recordings"): return None
+    if not results or not results[0].get("recordings"):
+        return None
     rec    = results[0]["recordings"][0]
     artist = rec.get("artists", [{}])[0].get("name", "") if rec.get("artists") else ""
     title  = rec.get("title", "")
@@ -98,16 +125,20 @@ def acoustid_lookup(filepath, api_key="8XaBELgH"):
         mediums = rel.get("mediums", [])
         if mediums and mediums[0].get("tracks"):
             track = str(mediums[0]["tracks"][0].get("position", ""))
-    return {"title":title,"artist":artist,"album":album,
-            "year":year,"track":track,"disc":""}
+    return {"title": title, "artist": artist, "album": album,
+            "year": year, "track": track, "disc": ""}
+
 
 def fpcalc_status():
     p = find_fpcalc()
     return ("ok", p) if p else ("missing", None)
 
+
 def read_tags(path):
-    try: tags = ID3(path)
-    except ID3NoHeaderError: return {}
+    try:
+        tags = ID3(path)
+    except ID3NoHeaderError:
+        return {}
     def g(k):
         v = tags.get(k)
         return str(v.text[0]).strip() if v and v.text else ""
@@ -120,17 +151,23 @@ def read_tags(path):
         "disc":   "",
     }
 
+
 def write_tags(path, meta):
-    try: tags = ID3(path)
-    except ID3NoHeaderError: tags = ID3()
+    try:
+        tags = ID3(path)
+    except ID3NoHeaderError:
+        tags = ID3()
     def s(k, cls, v):
-        if v: tags.delall(k); tags.add(cls(encoding=3, text=[v]))
+        if v:
+            tags.delall(k)
+            tags.add(cls(encoding=3, text=[v]))
     s("TIT2", TIT2, meta.get("title"))
     s("TPE1", TPE1, meta.get("artist"))
     s("TALB", TALB, meta.get("album"))
     s("TDRC", TDRC, meta.get("year"))
     s("TRCK", TRCK, meta.get("track"))
     tags.save(path)
+
 
 SAFE_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -142,8 +179,7 @@ def normalize_album_key(folder_name):
     return re.sub(r'[^a-z0-9]', '', name.lower())
 
 def folder_score(folder_name):
-    has_year = bool(re.match(r'^\d{4}\s*-\s*', folder_name))
-    return (1 if has_year else 0)
+    return 1 if re.match(r'^\d{4}\s*-\s*', folder_name) else 0
 
 def destination(root, meta):
     artist = safe(meta.get("artist") or "Unknown Artist")
@@ -166,7 +202,7 @@ def collect_mp3s(folder):
 def merge_duplicate_albums(output_root, log_cb=None):
     def log(m):
         if log_cb: log_cb(m)
-    output_root = Path(output_root)
+    output_root  = Path(output_root)
     merged_count = 0
     for artist_dir in sorted(output_root.iterdir()):
         if not artist_dir.is_dir(): continue
@@ -178,13 +214,10 @@ def merge_duplicate_albums(output_root, log_cb=None):
         for key, dirs in groups.items():
             if len(dirs) < 2: continue
             def sort_key(d):
-                score = folder_score(d.name)
                 m = re.match(r'^(\d{4})', d.name)
-                year = int(m.group(1)) if m else 9999
-                return (-score, year)
+                return (-folder_score(d.name), int(m.group(1)) if m else 9999)
             dirs_sorted = sorted(dirs, key=sort_key)
-            winner      = dirs_sorted[0]
-            losers      = dirs_sorted[1:]
+            winner, losers = dirs_sorted[0], dirs_sorted[1:]
             log(f"  🔀 Merging into: {artist_dir.name}/{winner.name}")
             for loser in losers:
                 log(f"      ← absorbing: {loser.name}")
@@ -200,11 +233,10 @@ def merge_duplicate_albums(output_root, log_cb=None):
                     merged_count += 1
                 except Exception as e:
                     log(f"      ! could not remove {loser.name}: {e}")
-    if merged_count:
-        log(f"  ✅ Merged {merged_count} duplicate album folder(s)")
-    else:
-        log("  ✅ No duplicate album folders found")
+    log(f"  ✅ Merged {merged_count} duplicate album folder(s)" if merged_count
+        else "  ✅ No duplicate album folders found")
     return merged_count
+
 
 def process_file(path, dst, opts, stats, log_cb=None):
     def log(msg):
@@ -212,23 +244,23 @@ def process_file(path, dst, opts, stats, log_cb=None):
     meta   = read_tags(path)
     source = "tags"
     if meta.get("artist") or meta.get("title"):
-        mb = search_mb(meta.get("artist",""), meta.get("title",""), meta.get("album",""))
+        mb = search_mb(meta.get("artist", ""), meta.get("title", ""), meta.get("album", ""))
         if mb:
-            for k in ("title","artist","album","year","track","disc"):
+            for k in ("title", "artist", "album", "year", "track", "disc"):
                 if mb.get(k): meta[k] = mb[k]
             source = "MusicBrainz"
             log(f"  ✓ MusicBrainz: {meta.get('artist')} — {meta.get('title')}")
     if source == "tags" and opts.get("acoustid", True):
         if find_fpcalc():
-            log("  ⟳ AcoustID fingerprint…")
+            log("  ⟳ Fingerprinting…")
             ac = acoustid_lookup(path)
             if ac:
-                for k in ("title","artist","album","year","track","disc"):
+                for k in ("title", "artist", "album", "year", "track", "disc"):
                     if ac.get(k): meta[k] = ac[k]
                 source = "AcoustID"
-                log(f"  ✓ AcoustID: {meta.get('artist')} — {meta.get('title')}")
+                log(f"  ✓ Fingerprint: {meta.get('artist')} — {meta.get('title')}")
         else:
-            log("  ⚠ AcoustID skipped — fpcalc not found")
+            log("  ⚠ Fingerprinting skipped — fpcalc not found")
     if source == "tags":
         log("  ✗ Could not identify — using existing tags")
     if not meta.get("title"):  meta["title"]  = Path(path).stem
