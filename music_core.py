@@ -67,24 +67,31 @@ def search_mb(artist, title, album=""):
     return result
 
 
-def _exe_dir():
-    """
-    Returns the directory that contains the running exe or script.
-    Handles PyInstaller onefile correctly via sys.frozen + sys.executable.
-    """
-    if getattr(sys, 'frozen', False):
-        return Path(sys.executable).parent.resolve()
-    return Path(__file__).parent.resolve()
-
-
 def find_fpcalc():
     fname = "fpcalc.exe" if os.name == "nt" else "fpcalc"
-    # 1. next to the exe / script
-    local = _exe_dir() / fname
-    if local.exists():
-        return str(local)
-    # 2. in PATH
+
+    # 1. Embedded inside PyInstaller onefile exe (_MEIPASS = temp extraction dir)
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        p = Path(meipass) / fname
+        if p.exists():
+            return str(p)
+
+    # 2. Next to the script / exe on disk
+    if getattr(sys, "frozen", False):
+        p = Path(sys.executable).parent / fname
+    else:
+        p = Path(__file__).parent / fname
+    if p.exists():
+        return str(p)
+
+    # 3. System PATH
     return shutil.which("fpcalc")
+
+
+def fpcalc_status():
+    p = find_fpcalc()
+    return ("ok", p) if p else ("missing", None)
 
 
 def acoustid_lookup(filepath, api_key="8XaBELgH"):
@@ -127,11 +134,6 @@ def acoustid_lookup(filepath, api_key="8XaBELgH"):
             track = str(mediums[0]["tracks"][0].get("position", ""))
     return {"title": title, "artist": artist, "album": album,
             "year": year, "track": track, "disc": ""}
-
-
-def fpcalc_status():
-    p = find_fpcalc()
-    return ("ok", p) if p else ("missing", None)
 
 
 def read_tags(path):

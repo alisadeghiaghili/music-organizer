@@ -21,6 +21,14 @@ if errorlevel 1 (
     set PYEXE=py -3
 )
 
+:: fpcalc.exe must exist in this folder to embed it into the exe
+if not exist "fpcalc.exe" (
+    echo  [ERROR] fpcalc.exe not found in project folder.
+    echo  Download it from: https://github.com/acoustid/chromaprint/releases
+    echo  and place fpcalc.exe next to build.bat, then run again.
+    pause & exit /b 1
+)
+
 :: create venv if missing
 if not exist ".venv\Scripts\python.exe" (
     echo  [1/6] Creating virtual environment...
@@ -43,6 +51,7 @@ pyinstaller --noconfirm --clean --onefile --windowed ^
     --name "MusicOrganizer-GUI" ^
     --add-data "music_core.py;." ^
     --add-data "fpcalc_installer.py;." ^
+    --add-binary "fpcalc.exe;." ^
     --hidden-import "music_core" ^
     --hidden-import "fpcalc_installer" ^
     --hidden-import "mutagen" ^
@@ -68,6 +77,7 @@ pyinstaller --noconfirm --clean --onefile --console ^
     --name "MusicOrganizer-CLI" ^
     --add-data "music_core.py;." ^
     --add-data "fpcalc_installer.py;." ^
+    --add-binary "fpcalc.exe;." ^
     --hidden-import "music_core" ^
     --hidden-import "fpcalc_installer" ^
     --hidden-import "mutagen" ^
