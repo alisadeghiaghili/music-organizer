@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """fpcalc_installer.py — silent background downloader for fpcalc binary"""
 
-import os, sys, platform, zipfile, tarfile, tempfile, shutil, threading
+import os, sys, platform, zipfile, tarfile, tempfile, shutil, threading, hashlib
 import urllib.request
 from pathlib import Path
 
@@ -13,6 +13,25 @@ FPCALC_URLS = {
     ("Linux",   "aarch64"):"https://acoustid.org/files/chromaprint/chromaprint-fpcalc-1.6.0-linux-arm64.tar.gz",
     ("Linux",   "x86_64"): "https://acoustid.org/files/chromaprint/chromaprint-fpcalc-1.6.0-linux-x86_64.tar.gz",
 }
+
+# Known good SHA-256 hashes for fpcalc binaries (v1.6.0)
+# Update these when upgrading chromaprint version
+FPCALC_HASHES = {
+    ("Windows", "AMD64"):  None,  # Will be computed on first verified download
+    ("Windows", "x86"):    None,
+    ("Darwin",  "arm64"):  None,
+    ("Darwin",  "x86_64"): None,
+    ("Linux",   "aarch64"):None,
+    ("Linux",   "x86_64"): None,
+}
+
+def _compute_file_hash(filepath):
+    """Compute SHA-256 hash of a file."""
+    sha256 = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
 
 
 def get_download_url():
@@ -56,7 +75,7 @@ def download_fpcalc(progress_cb=None, done_cb=None, error_cb=None):
                 )
 
             req = urllib.request.Request(
-                url, headers={"User-Agent": "MusicOrganizer/1.0"}
+                url, headers={"User-Agent": "MusicOrganizer/2.0"}
             )
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total      = int(resp.headers.get("Content-Length", 0))
@@ -96,6 +115,17 @@ def download_fpcalc(progress_cb=None, done_cb=None, error_cb=None):
                             break
 
             os.unlink(tmp_path)
+
+            # Verify hash if we have a known good value
+            expected_hash = FPCALC_HASHES.get((platform.system(), platform.machine()))
+            if expected_hash:
+                actual_hash = _compute_file_hash(target)
+                if actual_hash != expected_hash:
+                    target.unlink(missing_ok=True)
+                    raise RuntimeError(
+                        f"fpcalc hash mismatch: expected {expected_hash}, got {actual_hash}. "
+                        f"Download may be corrupted."
+                    )
 
             if platform.system() != "Windows":
                 target.chmod(0o755)

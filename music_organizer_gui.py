@@ -13,6 +13,7 @@ class App(tk.Tk):
         super().__init__()
         self.title("\U0001f3b8 Music Organizer")
         self.geometry("1000x760")
+        self.minsize(800, 600)
         self.configure(bg="#1a1a1a")
         self.resizable(True, True)
         self._stop_flag   = threading.Event()
@@ -161,6 +162,7 @@ class App(tk.Tk):
         self._acoustid     = tk.BooleanVar(value=True)
         self._wtags        = tk.BooleanVar(value=True)
         self._fetch_art    = tk.BooleanVar(value=True)
+        self._fetch_lyrics = tk.BooleanVar(value=True)
         self._overwrite_art = tk.BooleanVar(value=False)
         self._overwrite    = tk.BooleanVar(value=False)
         self._dry_run      = tk.BooleanVar(value=False)
@@ -173,6 +175,7 @@ class App(tk.Tk):
             (self._acoustid,     "Deep metadata lookup"),
             (self._wtags,        "Save enriched tags"),
             (self._fetch_art,    "Download album art"),
+            (self._fetch_lyrics, "Fetch lyrics"),
             (self._overwrite_art, "Replace existing art"),
             (self._overwrite,    "Overwrite duplicates"),
             (self._dry_run,      "Preview only"),
@@ -233,6 +236,12 @@ class App(tk.Tk):
                                               bg="#111", fg="#888",
                                               font=("Consolas", 9), relief="flat")
         self._log.pack(fill="x", padx=20, pady=(0, 10))
+
+        # keyboard shortcuts
+        self.bind("<Control-s>", lambda e: self._scan())
+        self.bind("<Control-S>", lambda e: self._scan())
+        self.bind("<Escape>", lambda e: self._stop())
+        self.bind("<space>", lambda e: self._toggle_pause())
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
@@ -331,6 +340,7 @@ class App(tk.Tk):
             "overwrite":    self._overwrite.get(),
             "dry_run":      self._dry_run.get(),
             "fetch_art":    self._fetch_art.get(),
+            "fetch_lyrics": self._fetch_lyrics.get(),
             "overwrite_art": self._overwrite_art.get(),
         }
         threading.Thread(target=self._worker,

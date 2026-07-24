@@ -1,2 +1,6 @@
 mutagen>=1.47
 rich>=13.0
+
+# Development
+pytest>=7.0
+pytest-cov>=4.0

@@ -5,9 +5,14 @@ Usage: python music_organizer_cli.py [SOURCE] [OUTPUT] [OPTIONS]
        python music_organizer_cli.py          (interactive)
 """
 
-import os, sys, argparse, threading
+import os, sys, argparse, threading, msvcrt  # msvcrt for Windows keyboard input
 from music_core import collect_mp3s, process_file, merge_duplicate_albums, fpcalc_status
 from fpcalc_installer import download_fpcalc
+
+# ── Pause/Resume state ────────────────────────────────────────────────────────
+_pause_event = threading.Event()
+_pause_event.set()  # Start in running state
+_stop_flag = threading.Event()
 
 try:
     from rich.console import Console
@@ -145,7 +150,31 @@ def show_summary(stats, dst):
 
 # ── main run ──────────────────────────────────────────────────────────────────
 
+def _check_keyboard():
+    """Listen for P (pause) and R (resume) keys in background."""
+    while not _stop_flag.is_set():
+        if msvcrt.kbhit():
+            key = msvcrt.getch().decode('utf-8', errors='ignore').lower()
+            if key == 'p' and _pause_event.is_set():
+                _pause_event.clear()
+                cprint("\n[yellow]\u23f8 Paused — press R to resume, S to stop[/yellow]"
+                       if HAS_RICH else "\nPaused — press R to resume, S to stop")
+            elif key == 'r' and not _pause_event.is_set():
+                _pause_event.set()
+                cprint("[green]\u25b6 Resumed[/green]" if HAS_RICH else "Resumed")
+            elif key == 's':
+                _stop_flag.set()
+                _pause_event.set()  # Unblock if paused
+                cprint("[red]\u23f9 Stopping...[/red]" if HAS_RICH else "Stopping...")
+        threading.Event().wait(0.1)  # Small sleep to avoid busy-wait
+
+
 def run(src, dst, opts, verbose=False, do_merge=True):
+    global _pause_event, _stop_flag
+    _pause_event = threading.Event()
+    _pause_event.set()
+    _stop_flag = threading.Event()
+
     if not os.path.isdir(src):
         cprint(f"[red]Error:[/red] not found: {src}")
         sys.exit(1)
@@ -197,6 +226,13 @@ def run(src, dst, opts, verbose=False, do_merge=True):
         return {"MusicBrainz": "online", "AcoustID": "online",
                 "tags": "local tags"}.get(source, source)
 
+    # Start keyboard listener for pause/resume
+    kb_thread = threading.Thread(target=_check_keyboard, daemon=True)
+    kb_thread.start()
+
+    cprint("[dim]Press P to pause, R to resume, S to stop[/dim]" if HAS_RICH
+           else "Press P to pause, R to resume, S to stop")
+
     if HAS_RICH:
         with Progress(
             SpinnerColumn(),
@@ -208,6 +244,11 @@ def run(src, dst, opts, verbose=False, do_merge=True):
         ) as prog:
             task = prog.add_task("[cyan]Organizing\u2026", total=total)
             for i, path in enumerate(mp3s, 1):
+                if _stop_flag.is_set():
+                    cprint("\n[yellow]Stopped by user.[/yellow]" if HAS_RICH
+                           else "\nStopped by user.")
+                    break
+                _pause_event.wait()  # Block while paused
                 prog.update(task, description=f"[cyan]{os.path.basename(path)[:44]}")
                 meta, source, status, dest = process_file(
                     path, dst, opts, stats, log_cb=log)
@@ -222,6 +263,10 @@ def run(src, dst, opts, verbose=False, do_merge=True):
                 prog.advance(task)
     else:
         for i, path in enumerate(mp3s, 1):
+            if _stop_flag.is_set():
+                print("\nStopped by user.")
+                break
+            _pause_event.wait()  # Block while paused
             print(f"[{i}/{total}] {os.path.basename(path)}")
             meta, source, status, dest = process_file(
                 path, dst, opts, stats, log_cb=log)
@@ -251,7 +296,7 @@ def interactive():
     if HAS_RICH:
         console.print(Panel.fit(
             "[bold cyan]\U0001f3b8 Music Organizer[/bold cyan]\n"
-            "[dim]Organize your MP3 library with online metadata[/dim]",
+            "[dim]Organize your music library with online metadata[/dim]",
             border_style="cyan"))
         src       = Prompt.ask("[cyan]Source folder[/cyan]").strip()
         dst       = Prompt.ask("[cyan]Output folder[/cyan]", default=src).strip()
@@ -259,6 +304,7 @@ def interactive():
         deep_meta = Confirm.ask("Use deep metadata lookup?",              default=True)
         wtags     = Confirm.ask("Save enriched tags to files?",           default=True)
         fetch_art = Confirm.ask("Download album art?",                    default=True)
+        fetch_lyrics = Confirm.ask("Fetch lyrics?",                       default=True)
         over      = Confirm.ask("Overwrite existing files?",              default=False)
         dry       = Confirm.ask("Preview only? (no changes)",             default=False)
         do_merge  = Confirm.ask("Merge duplicate album folders?",         default=True)
@@ -271,6 +317,7 @@ def interactive():
         deep_meta = input("Deep metadata lookup? [Y/n]: ").strip().lower() != "n"
         wtags     = input("Save enriched tags? [Y/n]: ").strip().lower() != "n"
         fetch_art = input("Download album art? [Y/n]: ").strip().lower() != "n"
+        fetch_lyrics = input("Fetch lyrics? [Y/n]: ").strip().lower() != "n"
         over      = input("Overwrite existing? [y/N]: ").strip().lower() == "y"
         dry       = input("Preview only? [y/N]: ").strip().lower() == "y"
         do_merge  = input("Merge duplicate albums? [Y/n]: ").strip().lower() != "n"
@@ -279,17 +326,20 @@ def interactive():
     opts = {
         "copy": copy, "acoustid": deep_meta, "write_tags": wtags,
         "overwrite": over, "dry_run": dry,
-        "fetch_art": fetch_art, "overwrite_art": False,
+        "fetch_art": fetch_art, "fetch_lyrics": fetch_lyrics,
+        "overwrite_art": False,
     }
     run(src, dst, opts, verbose=verbose, do_merge=do_merge)
 
 
 # ── CLI argument parser ───────────────────────────────────────────────────────
 
+__version__ = "2.1.0"
+
 def main():
     p = argparse.ArgumentParser(
         prog="music_organizer",
-        description="\U0001f3b8 Music Organizer \u2014 organize your MP3 library",
+        description="\U0001f3b8 Music Organizer \u2014 organize your music library",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -299,12 +349,14 @@ Examples:
   python music_organizer_cli.py "D:/Music" "D:/Organized" --preview
   python music_organizer_cli.py "D:/Music" "D:/Organized" --no-art
 """)
+    p.add_argument("--version",     action="version", version=f"%(prog)s {__version__}")
     p.add_argument("source",        nargs="?", metavar="SOURCE")
     p.add_argument("output",        nargs="?", metavar="OUTPUT")
     p.add_argument("--move",        action="store_true", help="Move files instead of copying")
     p.add_argument("--no-deep",     action="store_true", help="Skip deep metadata lookup")
     p.add_argument("--no-tags",     action="store_true", help="Do not write tags back to files")
     p.add_argument("--no-art",      action="store_true", help="Skip album art download")
+    p.add_argument("--no-lyrics",   action="store_true", help="Skip lyrics fetching")
     p.add_argument("--replace-art", action="store_true", help="Replace existing album art")
     p.add_argument("--overwrite",   action="store_true", help="Overwrite existing output files")
     p.add_argument("--preview",     action="store_true", help="Show what would happen without changes")
@@ -315,7 +367,7 @@ Examples:
 
     if args.install_deps:
         import subprocess
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "mutagen", "rich", "-q"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-q"])
         print("Done.")
         return
 
@@ -330,6 +382,7 @@ Examples:
         "overwrite":    args.overwrite,
         "dry_run":      args.preview,
         "fetch_art":    not args.no_art,
+        "fetch_lyrics": not args.no_lyrics,
         "overwrite_art": args.replace_art,
     }
     run(args.source, args.output or args.source, opts,

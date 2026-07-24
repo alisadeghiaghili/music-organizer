@@ -4,6 +4,52 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.1.0] — 2026-07-24
+
+### Added
+
+- **Lyrics fetching** — LRCLIB integration (free, no API key) fetches synced LRC lyrics and plain text lyrics
+- **Lyrics written to files** — USLT/SYLT ID3 frames for MP3, `lyrics` Vorbis tag for FLAC/OGG, `\xa9lyr` for MP4
+- **Cover art for all formats** — FLAC (METADATA_BLOCK_PICTURE), OGG (base64 METADATA_BLOCK_PICTURE), MP4 (covr atom)
+- **`--no-lyrics` CLI flag** — skip lyrics fetching
+- **Fetch lyrics option** — available in GUI checkbox and CLI interactive mode
+- **`_is_confident_match()`** — smart title correction that checks release_id + title/album consistency before overwriting
+
+### Fixed
+
+- **Album detection** — removed exact-match quotes from MusicBrainz queries for fuzzy matching; studio albums now preferred over compilations
+- **Multi-disc track lookup** — searches all media to find which disc contains the matched recording (was only reading disc 1)
+- **Title correction too aggressive** — now checks confidence before overwriting existing non-empty tags; logs when keeping existing values
+- **Cover art overwrite** — `save_folder_cover()` now supports overwrite parameter; folder cover.jpg updates when `overwrite_art` is set
+- **Destructive tag clearing** — FLAC/OGG writers no longer call `tags.clear()` which wiped all Vorbis comments; now only updates managed keys
+- **Cover art fetching** — always fetches art when release_id is known (was skipping files that already had embedded art)
+
+---
+
+## [2.0.0] — 2026-07-24
+
+### Added
+
+- **Multi-format support** — MP3, FLAC, OGG/Vorbis, M4A/MP4, WAV, AIFF, Opus, APE, WMA (previously MP3-only)
+- **Centralized configuration** — `config.py` with `~/.music-organizer/config.json` and `MUSIC_ORG_*` environment variable overrides
+- **Format-aware tag reading** — specialized readers for each audio format (ID3, VorbisComment, MP4Tags)
+- **Format-aware tag writing** — writes metadata in the native format of each file type
+- **`collect_audio_files()`** — replaces `collect_mp3s()`, discovers all supported audio formats (backward-compatible alias kept)
+- **File extension preservation** — organized files keep their original format (.flac stays .flac, etc.)
+- **Test suite** — 37 pytest tests covering config, tag reading, filename handling, file collection, and destination paths
+- **`pyproject.toml`** — modern Python packaging configuration
+
+### Changed
+
+- `read_tags()` now dispatches to format-specific readers (ID3, FLAC, VorbisComment, MP4) with generic fallback
+- `write_tags()` now dispatches to format-specific writers for each audio format
+- `destination()` preserves original file extension instead of hardcoding `.mp3`
+- All hardcoded API keys and URLs moved to `config.py` defaults
+- `safe()` now reads max length from configuration
+- `process_file()` injects `_extension` into metadata for downstream use
+
+---
+
 ## [1.1.0] — 2026-06-24
 
 ### Added

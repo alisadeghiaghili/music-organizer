@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# PyInstaller
+dist/
+build/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# MiMoCode
+.mimocode/
+research/
+
+# Cache
+.music-organizer/
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
