@@ -5,7 +5,7 @@ Usage: python music_organizer_cli.py [SOURCE] [OUTPUT] [OPTIONS]
        python music_organizer_cli.py          (interactive)
 """
 
-import os, sys, argparse, threading, msvcrt  # msvcrt for Windows keyboard input
+import os, sys, argparse, threading
 from music_core import collect_mp3s, process_file, merge_duplicate_albums, fpcalc_status
 from fpcalc_installer import download_fpcalc
 
@@ -148,26 +148,55 @@ def show_summary(stats, dst):
         print(f"\nDone \u2014 OK:{stats['ok']} Skipped:{stats['skipped']} Errors:{stats['errors']}")
 
 
-# ── main run ──────────────────────────────────────────────────────────────────
+# ── keyboard listener (cross-platform) ───────────────────────────────────────
 
 def _check_keyboard():
-    """Listen for P (pause) and R (resume) keys in background."""
-    while not _stop_flag.is_set():
-        if msvcrt.kbhit():
-            key = msvcrt.getch().decode('utf-8', errors='ignore').lower()
-            if key == 'p' and _pause_event.is_set():
-                _pause_event.clear()
-                cprint("\n[yellow]\u23f8 Paused — press R to resume, S to stop[/yellow]"
-                       if HAS_RICH else "\nPaused — press R to resume, S to stop")
-            elif key == 'r' and not _pause_event.is_set():
-                _pause_event.set()
-                cprint("[green]\u25b6 Resumed[/green]" if HAS_RICH else "Resumed")
-            elif key == 's':
-                _stop_flag.set()
-                _pause_event.set()  # Unblock if paused
-                cprint("[red]\u23f9 Stopping...[/red]" if HAS_RICH else "Stopping...")
-        threading.Event().wait(0.1)  # Small sleep to avoid busy-wait
+    """Listen for P (pause), R (resume), S (stop) — works on Windows and POSIX."""
+    if os.name == "nt":
+        # Windows: use msvcrt for non-blocking key detection
+        try:
+            import msvcrt
+        except ImportError:
+            return
+        while not _stop_flag.is_set():
+            if msvcrt.kbhit():
+                key = msvcrt.getch().decode("utf-8", errors="ignore").lower()
+                _handle_key(key)
+            threading.Event().wait(0.1)
+    else:
+        # POSIX (macOS / Linux): use select on stdin
+        import select, tty, termios
+        try:
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+        except Exception:
+            return  # stdin is not a tty (e.g. piped) — skip keyboard listener
+        try:
+            tty.setraw(fd)
+            while not _stop_flag.is_set():
+                rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+                if rlist:
+                    key = sys.stdin.read(1).lower()
+                    _handle_key(key)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
+
+def _handle_key(key):
+    if key == "p" and _pause_event.is_set():
+        _pause_event.clear()
+        cprint("\n[yellow]\u23f8 Paused \u2014 press R to resume, S to stop[/yellow]"
+               if HAS_RICH else "\nPaused \u2014 press R to resume, S to stop")
+    elif key == "r" and not _pause_event.is_set():
+        _pause_event.set()
+        cprint("[green]\u25b6 Resumed[/green]" if HAS_RICH else "Resumed")
+    elif key == "s":
+        _stop_flag.set()
+        _pause_event.set()  # Unblock if paused
+        cprint("[red]\u23f9 Stopping...[/red]" if HAS_RICH else "Stopping...")
+
+
+# ── main run ──────────────────────────────────────────────────────────────────
 
 def run(src, dst, opts, verbose=False, do_merge=True):
     global _pause_event, _stop_flag
@@ -191,7 +220,7 @@ def run(src, dst, opts, verbose=False, do_merge=True):
 
     if HAS_RICH:
         with Progress(SpinnerColumn(),
-                      TextColumn("[cyan]Scanning for MP3 files\u2026"),
+                      TextColumn("[cyan]Scanning for audio files\u2026"),
                       console=console, transient=True) as scan_prog:
             scan_prog.add_task("scan", total=None)
             mp3s = collect_mp3s(src)
@@ -202,12 +231,12 @@ def run(src, dst, opts, verbose=False, do_merge=True):
 
     total = len(mp3s)
     if not total:
-        cprint("[yellow]No MP3 files found.[/yellow]" if HAS_RICH
-               else "No MP3 files found.")
+        cprint("[yellow]No supported audio files found.[/yellow]" if HAS_RICH
+               else "No supported audio files found.")
         return
 
-    cprint(f"\n[bold green]Found {total} MP3 files[/bold green]" if HAS_RICH
-           else f"\nFound {total} MP3 files\n")
+    cprint(f"\n[bold green]Found {total} audio files[/bold green]" if HAS_RICH
+           else f"\nFound {total} audio files\n")
 
     stats = {"ok": 0, "skipped": 0, "errors": 0}
     rows  = []
