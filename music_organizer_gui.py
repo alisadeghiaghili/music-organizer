@@ -4,7 +4,7 @@
 import os, sys, threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
-from music_core import collect_mp3s, read_tags, process_file, merge_duplicate_albums, fpcalc_status
+from music_core import collect_audio_files, read_tags, process_file, merge_duplicate_albums, fpcalc_status
 from fpcalc_installer import download_fpcalc
 
 
@@ -19,7 +19,7 @@ class App(tk.Tk):
         self._stop_flag   = threading.Event()
         self._pause_event = threading.Event()  # set=running, clear=paused
         self._pause_event.set()
-        self._mp3s      = []
+        self._audio_files = []
         self._fp_banner = None
         self._build_ui()
         self.after(300, self._check_fpcalc)
@@ -170,21 +170,24 @@ class App(tk.Tk):
 
         opt = ttk.Frame(self)
         opt.pack(fill="x", padx=20, pady=6)
-        for var, txt in [
-            (self._copy_mode,    "Keep originals"),
-            (self._acoustid,     "Deep metadata lookup"),
-            (self._wtags,        "Save enriched tags"),
-            (self._fetch_art,    "Download album art"),
-            (self._fetch_lyrics, "Fetch lyrics"),
-            (self._overwrite_art, "Replace existing art"),
-            (self._overwrite,    "Overwrite duplicates"),
-            (self._dry_run,      "Preview only"),
-            (self._do_merge,     "Merge duplicate albums"),
-        ]:
-            tk.Checkbutton(opt, variable=var, text=txt,
-                           bg=BG, fg=FG, selectcolor="#333",
-                           activebackground=BG, activeforeground=FG,
-                           font=("Segoe UI", 10)).pack(side="left", padx=7)
+        checkboxes = [
+            (self._copy_mode,    "Keep originals",        "Move originals to output; uncheck to copy"),
+            (self._acoustid,     "Deep metadata lookup",   "Use AcoustID audio fingerprinting for untagged files"),
+            (self._wtags,        "Save enriched tags",     "Write enriched metadata back to each file"),
+            (self._fetch_art,    "Download album art",     "Download and embed cover art from MusicBrainz"),
+            (self._fetch_lyrics, "Fetch lyrics",           "Download synced lyrics from LRCLIB (free, no key)"),
+            (self._overwrite_art, "Replace existing art",  "Replace already-embedded album art"),
+            (self._overwrite,    "Overwrite duplicates",   "Overwrite files that already exist in output"),
+            (self._dry_run,      "Preview only",           "Show what would happen without touching any files"),
+            (self._do_merge,     "Merge duplicate albums", "Consolidate split album folders after organizing"),
+        ]
+        for var, txt, tooltip in checkboxes:
+            cb = tk.Checkbutton(opt, variable=var, text=txt,
+                                bg=BG, fg=FG, selectcolor="#333",
+                                activebackground=BG, activeforeground=FG,
+                                font=("Segoe UI", 10))
+            cb.pack(side="left", padx=7)
+            self._add_tooltip(cb, tooltip)
 
         # action buttons
         btn = ttk.Frame(self)
@@ -243,6 +246,31 @@ class App(tk.Tk):
         self.bind("<Escape>", lambda e: self._stop())
         self.bind("<space>", lambda e: self._toggle_pause())
 
+    # ── tooltip helper ────────────────────────────────────────────────────────
+
+    def _add_tooltip(self, widget, text):
+        tip = None
+
+        def show(event):
+            nonlocal tip
+            x = widget.winfo_rootx() + 20
+            y = widget.winfo_rooty() + widget.winfo_height() + 4
+            tip = tk.Toplevel(widget)
+            tip.wm_overrideredirect(True)
+            tip.wm_geometry(f"+{x}+{y}")
+            tk.Label(tip, text=text, bg="#2d2d2d", fg="#e0e0e0",
+                     font=("Segoe UI", 9), relief="flat", padx=8, pady=4
+                     ).pack()
+
+        def hide(event):
+            nonlocal tip
+            if tip:
+                tip.destroy()
+                tip = None
+
+        widget.bind("<Enter>", show)
+        widget.bind("<Leave>", hide)
+
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _pick_src(self):
@@ -275,7 +303,7 @@ class App(tk.Tk):
             messagebox.showerror("Error", "Select a valid source folder.")
             return
         self._tree.delete(*self._tree.get_children())
-        self._mp3s = []
+        self._audio_files = []
         self._scan_btn.config(state="disabled")
         self._setstatus("Scanning\u2026")
         self._scan_prog.config(value=0, mode="indeterminate")
@@ -283,32 +311,45 @@ class App(tk.Tk):
         threading.Thread(target=self._scan_worker, args=(src,), daemon=True).start()
 
     def _scan_worker(self, src):
-        mp3s  = collect_mp3s(src)
-        total = len(mp3s)
+        """Run entirely in background thread — only schedules Tk updates via after()."""
+        audio_files = collect_audio_files(src)
+        total = len(audio_files)
 
-        def populate():
-            self._scan_prog.stop()
-            self._scan_prog.config(mode="determinate", maximum=max(total, 1), value=0)
-            self._mp3s = mp3s
-            for i, p in enumerate(mp3s):
-                t = read_tags(p)
-                genre_str = ", ".join(t.get("genres", [])[:2])
-                has_meta  = any(t.get(k) for k in ("artist", "album", "title"))
-                self._tree.insert("", "end", iid=p, values=(
-                    os.path.basename(p),
-                    t.get("artist", ""), t.get("album", ""),
-                    t.get("year", ""), t.get("track", ""), t.get("title", ""),
-                    genre_str, "ready"
-                ), tags=("partial" if has_meta else "error",))
-                self._scan_prog.config(value=i + 1)
-                if (i + 1) % 20 == 0:
-                    self.update_idletasks()
-            self._scan_btn.config(state="normal")
-            self._run_btn.config(state="normal" if mp3s else "disabled")
-            self._setstatus(f"{total} files found")
-            self._logmsg(f"Scanned '{src}' \u2014 {total} MP3 file(s) found")
+        # Switch progress bar from indeterminate to determinate
+        self.after(0, lambda: (
+            self._scan_prog.stop(),
+            self._scan_prog.config(mode="determinate", maximum=max(total, 1), value=0),
+        ))
 
-        self.after(0, populate)
+        self._audio_files = audio_files
+
+        for i, p in enumerate(audio_files):
+            # read_tags runs in background thread — no Tk calls here
+            t = read_tags(p)
+            genre_str = ", ".join(t.get("genres", [])[:2])
+            has_meta  = any(t.get(k) for k in ("artist", "album", "title"))
+            row_values = (
+                os.path.basename(p),
+                t.get("artist", ""), t.get("album", ""),
+                t.get("year", ""), t.get("track", ""), t.get("title", ""),
+                genre_str, "ready"
+            )
+            row_tag = "partial" if has_meta else "error"
+            progress = i + 1
+
+            # Schedule individual row insert + progress update on main thread
+            self.after(0, lambda path=p, vals=row_values, tag=row_tag, prog=progress: (
+                self._tree.insert("", "end", iid=path, values=vals, tags=(tag,)),
+                self._scan_prog.config(value=prog),
+            ))
+
+        # Finalise on main thread
+        self.after(0, lambda: (
+            self._scan_btn.config(state="normal"),
+            self._run_btn.config(state="normal" if audio_files else "disabled"),
+            self._setstatus(f"{total} files found"),
+            self._logmsg(f"Scanned '{src}' \u2014 {total} audio file(s) found"),
+        ))
 
     # ── organize ──────────────────────────────────────────────────────────────
 
@@ -318,7 +359,7 @@ class App(tk.Tk):
         if not dst:
             messagebox.showerror("Error", "Select an output folder.")
             return
-        if not self._mp3s:
+        if not self._audio_files:
             messagebox.showwarning("No files", "Please scan a folder first.")
             return
         if not self._copy_mode.get() and os.path.abspath(src) == os.path.abspath(dst):
@@ -363,11 +404,11 @@ class App(tk.Tk):
         self._logmsg("Stopping\u2026")
 
     def _worker(self, dst, opts, do_merge):
-        total = len(self._mp3s)
+        total = len(self._audio_files)
         done  = 0
         stats = {"ok": 0, "skipped": 0, "errors": 0}
 
-        for path in self._mp3s:
+        for path in self._audio_files:
             self._pause_event.wait()   # blocks here while paused
             if self._stop_flag.is_set():
                 break
