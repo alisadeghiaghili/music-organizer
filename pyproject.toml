@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "music-organizer"
-version = "2.0.0"
+version = "2.1.0"
 description = "Automatically organize your music library with online metadata and audio fingerprinting"
 readme = "README.md"
 license = {text = "MIT"}

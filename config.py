@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 
-# ── Default configuration ─────────────────────────────────────────────────────
+# ── Default configuration ──────────────────────────────────────────────────────
 
 DEFAULTS = {
     # API keys
@@ -26,7 +26,14 @@ DEFAULTS = {
     # Processing
     "max_genre_count": 4,
     "filename_max_length": 60,
-    "output_template": "{artist}/{year} - {album}/{track} - {title}.mp3",
+
+    # NOTE: output_template is intentionally NOT used by destination() in
+    # music_core.py. The actual output path is built dynamically from metadata
+    # (artist / year - album / track - title) with the file's native extension.
+    # This key is kept for future use and backwards-compatibility with user
+    # config files, but setting it has no effect on file placement.
+    "output_template": "{artist}/{year} - {album}/{track} - {title}{ext}",
+
     "cover_filename": "cover.jpg",
 
     # Audio format support
