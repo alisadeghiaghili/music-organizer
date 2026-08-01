@@ -37,7 +37,7 @@ HEADERS   = {"User-Agent": _cfg["user_agent"]}
 _last_mb  = 0.0
 _mb_lock  = threading.Lock()
 
-# ── API Response Cache ─────────────────────────────────────────────────────────
+# ── API Response Cache ───────────────────────────────────────────────────────────────
 _CACHE_DIR = Path.home() / ".music-organizer" / "cache"
 _CACHE_TTL = 86400  # 24 hours
 _CACHE_MAX_FILES = 1000  # Maximum cache files before cleanup
@@ -50,7 +50,6 @@ def _cache_cleanup():
         files = list(_CACHE_DIR.glob("*.json"))
         if len(files) <= _CACHE_MAX_FILES:
             return
-        # Sort by modification time, remove oldest
         files.sort(key=lambda f: f.stat().st_mtime)
         for f in files[:len(files) - _CACHE_MAX_FILES]:
             f.unlink(missing_ok=True)
@@ -90,11 +89,10 @@ def _make_cache_key(endpoint, params):
 _cache_cleanup()
 
 
-# ── MusicBrainz helpers ───────────────────────────────────────────────────────
+# ── MusicBrainz helpers ─────────────────────────────────────────────────────
 
 def mb_get(endpoint, params, retries=1):
     """Fetch from MusicBrainz with rate limiting, caching, and retry."""
-    # Check cache first
     cache_key = _make_cache_key(endpoint, params)
     cached = _cache_get(cache_key)
     if cached is not None:
@@ -117,7 +115,7 @@ def mb_get(endpoint, params, retries=1):
             except Exception:
                 _last_mb = time.time()
                 if attempt < retries:
-                    time.sleep(2)  # Wait before retry
+                    time.sleep(2)
                     continue
                 return None
     return None
@@ -132,11 +130,9 @@ def _best_release(releases):
         rtype = rel.get("primary-type", "").lower()
         secondary = [t.lower() for t in rel.get("secondary-types", [])]
 
-        # Score: prefer studio albums over compilations/greatest hits
         type_score = 3 if rtype == "album" and not secondary else 1
         if any(s in secondary for s in ("compilation", "greatest hits", "best of")):
             type_score = 0
-        # Prefer earlier releases (original over reissue)
         current_year = datetime.now().year
         year_score = max(0, 30 - (current_year - year)) if year < 9999 else 0
         score = type_score * 1000 + year_score
@@ -202,7 +198,6 @@ def search_mb(artist, title, album=""):
             media = rel.get("media", [])
             if media:
                 result["disc_total"] = str(len(media)) if len(media) > 1 else ""
-                # Search ALL media to find which disc contains this recording
                 found_track = False
                 for medium in media:
                     for track in medium.get("track", []):
@@ -215,7 +210,6 @@ def search_mb(artist, title, album=""):
                             break
                     if found_track:
                         break
-                # Fallback: use first media if recording not found in any
                 if not found_track and media:
                     m0 = media[0]
                     result["total_tracks"] = str(m0.get("track-count", ""))
@@ -235,7 +229,7 @@ def search_mb(artist, title, album=""):
     return result
 
 
-# ── Last.fm genre fallback ────────────────────────────────────────────────────
+# ── Last.fm genre fallback ──────────────────────────────────────────────────
 
 def lastfm_genres(artist, title, api_key=None, retries=1):
     """Fetch genres from Last.fm with caching and retry."""
@@ -243,7 +237,6 @@ def lastfm_genres(artist, title, api_key=None, retries=1):
     if not key:
         return []
 
-    # Check cache
     cache_key = _make_cache_key("lastfm", {"artist": artist, "title": title})
     cached = _cache_get(cache_key)
     if cached is not None:
@@ -271,14 +264,13 @@ def lastfm_genres(artist, title, api_key=None, retries=1):
             return []
 
 
-# ── Lyrics (LRCLIB) ──────────────────────────────────────────────────────────
+# ── Lyrics (LRCLIB) ────────────────────────────────────────────────────────────
 
 def fetch_lyrics(artist, title, album="", duration=0, retries=1):
     """Fetch lyrics from LRCLIB (free, no API key) with caching and retry.
     Returns (plain_lyrics, synced_lyrics) or (None, None).
     synced_lyrics is in standard LRC format [MM:SS.xx] text.
     """
-    # Check cache
     cache_key = _make_cache_key("lrclib", {"artist": artist, "title": title, "album": album})
     cached = _cache_get(cache_key)
     if cached is not None:
@@ -309,14 +301,47 @@ def fetch_lyrics(artist, title, album="", duration=0, retries=1):
             return None, None
 
 
-# ── Cover Art Archive ─────────────────────────────────────────────────────────
+def _parse_lrc_to_sylt(lrc_text):
+    """Convert LRC-format lyrics string to SYLT-compatible list of (text, ms) tuples.
+
+    LRC format: [MM:SS.xx] lyric line
+    SYLT format: list of (str, int) where int is timestamp in milliseconds.
+    Lines with no timestamp (e.g. metadata tags like [ar:...]) are skipped.
+    """
+    if not lrc_text:
+        return []
+    result = []
+    lrc_re = re.compile(r'^\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)$')
+    for line in lrc_text.splitlines():
+        m = lrc_re.match(line.strip())
+        if not m:
+            continue
+        minutes, seconds, centis, text = m.groups()
+        # Convert to milliseconds; centis may be 2 or 3 digits
+        cs_ms = int(centis) * (10 if len(centis) == 2 else 1)
+        ms = int(minutes) * 60_000 + int(seconds) * 1_000 + cs_ms
+        result.append((text.strip(), ms))
+    return result
+
+
+def _get_audio_duration(path):
+    """Return audio duration in seconds (float), or 0 on failure."""
+    try:
+        audio = MutagenFile(path)
+        if audio is not None and audio.info is not None:
+            return audio.info.length
+    except Exception:
+        pass
+    return 0
+
+
+# ── Cover Art Archive ────────────────────────────────────────────────────────────
 
 def fetch_cover_art(release_id, size="large", retries=1):
     """Fetch album art from Cover Art Archive with caching and retry."""
     if not release_id:
         return None
 
-    # Check cache
     cache_key = _make_cache_key("caa", {"release_id": release_id, "size": size})
     cached = _cache_get(cache_key)
     if cached is not None:
@@ -351,19 +376,17 @@ def save_folder_cover(album_dir: Path, img_bytes: bytes, overwrite=False):
     return str(cover_path) if cover_path.exists() else None
 
 
-# ── fpcalc / AcoustID ─────────────────────────────────────────────────────────
+# ── fpcalc / AcoustID ────────────────────────────────────────────────────────────
 
 def find_fpcalc():
     fname = "fpcalc.exe" if os.name == "nt" else "fpcalc"
 
-    # 1. Embedded inside PyInstaller onefile exe
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         p = Path(meipass) / fname
         if p.exists():
             return str(p)
 
-    # 2. Next to the script / exe on disk
     if getattr(sys, "frozen", False):
         p = Path(sys.executable).parent / fname
     else:
@@ -371,7 +394,6 @@ def find_fpcalc():
     if p.exists():
         return str(p)
 
-    # 3. System PATH
     return shutil.which("fpcalc")
 
 
@@ -396,7 +418,6 @@ def acoustid_lookup(filepath, api_key=None, retries=1):
     except Exception:
         return None
 
-    # Check cache using deterministic hash
     fp_str = fp.get("fingerprint", "")
     cache_key = f"acoustid_{hashlib.md5(fp_str.encode()).hexdigest()[:12]}"
     cached = _cache_get(cache_key)
@@ -451,19 +472,17 @@ def acoustid_lookup(filepath, api_key=None, retries=1):
     return result
 
 
-# ── Tags ──────────────────────────────────────────────────────────────────────
+# ── Tags ─────────────────────────────────────────────────────────────────────────────
 
 def _get_tag_value(tags, key):
     """Extract a string value from a tag, handling various formats."""
     v = tags.get(key)
     if v is None:
         return ""
-    # ID3 frames have .text attribute
     if hasattr(v, "text"):
         texts = v.text
         if texts:
             return str(texts[0]).strip()
-    # Vorbis/MP4 use list values
     if isinstance(v, list) and v:
         return str(v[0]).strip()
     return str(v).strip()
@@ -484,14 +503,12 @@ def _get_tag_values(tags, key):
 def _get_genres(tags):
     """Extract genres from tags, handling various formats."""
     genres = []
-    # Try ID3 TCON first
     tcon = tags.get("TCON")
     if tcon is not None:
         if hasattr(tcon, "genres") and tcon.genres:
             genres = [x.strip().title() for x in tcon.genres if x.strip()]
         elif hasattr(tcon, "text"):
             genres = [x.strip().title() for x in tcon.text if x.strip()]
-    # Try Vorbis/MP4 genre tags
     if not genres:
         for key in ("genre", "GENRE"):
             v = tags.get(key)
@@ -507,15 +524,12 @@ def _get_genres(tags):
 
 def _has_artwork(tags):
     """Check if tags contain embedded artwork."""
-    # ID3 APIC
     apic = tags.get("APIC")
     if apic:
         return True
-    # MP4 covr
     covr = tags.get("covr") or tags.get("COVR")
     if covr:
         return True
-    # FLAC picture
     if hasattr(tags, "pictures") and tags.pictures:
         return True
     return False
@@ -531,7 +545,6 @@ def read_tags(path):
 
     ext = Path(path).suffix.lower()
 
-    # Try format-specific readers first for better accuracy
     if ext == ".mp3":
         return _read_id3_tags(path, empty)
     elif ext in (".flac",):
@@ -545,7 +558,6 @@ def read_tags(path):
     elif ext in (".aiff", ".aif"):
         return _read_aiff_tags(path, empty)
 
-    # Fallback to generic mutagen.File()
     try:
         audio = MutagenFile(path)
         if audio is None:
@@ -688,7 +700,6 @@ def _read_wave_tags(path, empty):
     if tags is None:
         return empty
 
-    # WAV can have ID3 tags
     if hasattr(tags, "get"):
         return _read_id3_tags_from_dict(tags, empty)
 
@@ -750,7 +761,6 @@ def _read_generic_tags(audio, empty):
     if tags is None:
         return empty
 
-    # Try to get common keys
     title = _get_tag_value(tags, "title") or _get_tag_value(tags, "TIT2")
     artist = _get_tag_value(tags, "artist") or _get_tag_value(tags, "TPE1")
     album = _get_tag_value(tags, "album") or _get_tag_value(tags, "TALB")
@@ -843,16 +853,22 @@ def _write_id3_tags(path, meta, cover_bytes=None):
             type=3, desc="Cover", data=cover_bytes,
         ))
 
-    # Lyrics
-    if meta.get("_lyrics_synced"):
+    # Synced lyrics: convert LRC string → list of (text, ms) tuples for SYLT
+    sylt_data = _parse_lrc_to_sylt(meta.get("_lyrics_synced"))
+    if sylt_data:
         tags.delall("SYLT")
-        tags.add(SYLT(encoding=3, lang="eng", desc="",
-                      format=2,  # 2 = LRC timestamp format
-                      text=meta["_lyrics_synced"]))
+        tags.add(SYLT(
+            encoding=3, lang="eng", desc="",
+            format=2,   # 2 = milliseconds
+            type=1,     # 1 = lyrics
+            text=sylt_data,
+        ))
+
+    # Plain / unsynced lyrics
     if meta.get("_lyrics_plain"):
         tags.delall("USLT")
         tags.add(USLT(encoding=3, lang="eng", desc="",
-                       text=meta["_lyrics_plain"]))
+                      text=meta["_lyrics_plain"]))
 
     tags.save(path)
 
@@ -869,7 +885,6 @@ def _write_flac_tags(path, meta, cover_bytes=None):
         audio.add_tags()
         tags = audio.tags
 
-    # Only update managed keys (don't clear everything)
     managed = {"title", "artist", "album", "date", "tracknumber",
                "discnumber", "genre", "label", "composer", "lyrics",
                "METADATA_BLOCK_PICTURE"}
@@ -877,14 +892,10 @@ def _write_flac_tags(path, meta, cover_bytes=None):
         if key.lower() in managed or key == "METADATA_BLOCK_PICTURE":
             del tags[key]
 
-    if meta.get("title"):
-        tags["title"] = [meta["title"]]
-    if meta.get("artist"):
-        tags["artist"] = [meta["artist"]]
-    if meta.get("album"):
-        tags["album"] = [meta["album"]]
-    if meta.get("year"):
-        tags["date"] = [meta["year"]]
+    if meta.get("title"):    tags["title"]  = [meta["title"]]
+    if meta.get("artist"):   tags["artist"] = [meta["artist"]]
+    if meta.get("album"):    tags["album"]  = [meta["album"]]
+    if meta.get("year"):     tags["date"]   = [meta["year"]]
 
     trck = meta.get("track", "")
     ttrc = meta.get("total_tracks", "")
@@ -900,19 +911,18 @@ def _write_flac_tags(path, meta, cover_bytes=None):
     if genres:
         tags["genre"] = genres
 
-    if meta.get("label"):
-        tags["label"] = [meta["label"]]
-    if meta.get("composer"):
-        tags["composer"] = [meta["composer"]]
+    if meta.get("label"):    tags["label"]    = [meta["label"]]
+    if meta.get("composer"): tags["composer"] = [meta["composer"]]
 
-    # Lyrics
-    if meta.get("_lyrics_plain"):
+    # FLAC stores plain lyrics; synced LRC stored as-is in "lyrics" tag
+    if meta.get("_lyrics_synced"):
+        tags["lyrics"] = [meta["_lyrics_synced"]]
+    elif meta.get("_lyrics_plain"):
         tags["lyrics"] = [meta["_lyrics_plain"]]
 
-    # Cover art via METADATA_BLOCK_PICTURE
     if cover_bytes and not meta.get("has_art"):
         pic = Picture()
-        pic.type = 3  # Cover (front)
+        pic.type = 3
         pic.mime = "image/jpeg"
         pic.desc = "Cover"
         pic.data = cover_bytes
@@ -934,7 +944,6 @@ def _write_vorbis_tags(path, meta, cover_bytes=None):
         audio.add_tags()
         tags = audio.tags
 
-    # Only update managed keys (don't clear everything)
     managed = {"title", "artist", "album", "date", "tracknumber",
                "discnumber", "genre", "label", "composer", "lyrics",
                "METADATA_BLOCK_PICTURE"}
@@ -942,14 +951,10 @@ def _write_vorbis_tags(path, meta, cover_bytes=None):
         if key.lower() in managed or key == "METADATA_BLOCK_PICTURE":
             del tags[key]
 
-    if meta.get("title"):
-        tags["title"] = [meta["title"]]
-    if meta.get("artist"):
-        tags["artist"] = [meta["artist"]]
-    if meta.get("album"):
-        tags["album"] = [meta["album"]]
-    if meta.get("year"):
-        tags["date"] = [meta["year"]]
+    if meta.get("title"):    tags["title"]  = [meta["title"]]
+    if meta.get("artist"):   tags["artist"] = [meta["artist"]]
+    if meta.get("album"):    tags["album"]  = [meta["album"]]
+    if meta.get("year"):     tags["date"]   = [meta["year"]]
 
     trck = meta.get("track", "")
     ttrc = meta.get("total_tracks", "")
@@ -965,16 +970,15 @@ def _write_vorbis_tags(path, meta, cover_bytes=None):
     if genres:
         tags["genre"] = genres
 
-    if meta.get("label"):
-        tags["label"] = [meta["label"]]
-    if meta.get("composer"):
-        tags["composer"] = [meta["composer"]]
+    if meta.get("label"):    tags["label"]    = [meta["label"]]
+    if meta.get("composer"): tags["composer"] = [meta["composer"]]
 
-    # Lyrics
-    if meta.get("_lyrics_plain"):
+    # OGG stores plain lyrics; synced LRC stored as-is in "lyrics" tag
+    if meta.get("_lyrics_synced"):
+        tags["lyrics"] = [meta["_lyrics_synced"]]
+    elif meta.get("_lyrics_plain"):
         tags["lyrics"] = [meta["_lyrics_plain"]]
 
-    # Cover art via METADATA_BLOCK_PICTURE (base64 encoded in Vorbis comment)
     if cover_bytes and not meta.get("has_art"):
         pic = Picture()
         pic.type = 3
@@ -999,14 +1003,10 @@ def _write_mp4_tags(path, meta, cover_bytes=None):
 
     tags = audio.tags
 
-    if meta.get("title"):
-        tags["\xa9nam"] = [meta["title"]]
-    if meta.get("artist"):
-        tags["\xa9ART"] = [meta["artist"]]
-    if meta.get("album"):
-        tags["\xa9alb"] = [meta["album"]]
-    if meta.get("year"):
-        tags["\xa9day"] = [meta["year"]]
+    if meta.get("title"):    tags["\xa9nam"] = [meta["title"]]
+    if meta.get("artist"):   tags["\xa9ART"] = [meta["artist"]]
+    if meta.get("album"):    tags["\xa9alb"] = [meta["album"]]
+    if meta.get("year"):     tags["\xa9day"] = [meta["year"]]
 
     trck = meta.get("track", "")
     ttrc = meta.get("total_tracks", "")
@@ -1022,23 +1022,22 @@ def _write_mp4_tags(path, meta, cover_bytes=None):
     if genres:
         tags["\xa9gen"] = genres
 
-    if meta.get("label"):
-        tags["\xa9pub"] = [meta["label"]]
-    if meta.get("composer"):
-        tags["\xa9wrt"] = [meta["composer"]]
+    if meta.get("label"):    tags["\xa9pub"] = [meta["label"]]
+    if meta.get("composer"): tags["\xa9wrt"] = [meta["composer"]]
 
-    # Lyrics
-    if meta.get("_lyrics_plain"):
+    # MP4 stores plain lyrics; synced LRC stored as-is
+    if meta.get("_lyrics_synced"):
+        tags["\xa9lyr"] = [meta["_lyrics_synced"]]
+    elif meta.get("_lyrics_plain"):
         tags["\xa9lyr"] = [meta["_lyrics_plain"]]
 
-    # Cover art
     if cover_bytes and not meta.get("has_art"):
         tags["covr"] = [MP4Cover(cover_bytes, imageformat=MP4Cover.FORMAT_JPEG)]
 
     audio.save(path)
 
 
-# ── Filesystem ────────────────────────────────────────────────────────────────
+# ── Filesystem ──────────────────────────────────────────────────────────────────────────
 
 SAFE_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1082,7 +1081,7 @@ def collect_mp3s(folder):
     return collect_audio_files(folder)
 
 
-# ── Duplicate album merge ─────────────────────────────────────────────────────
+# ── Duplicate album merge ────────────────────────────────────────────────────────────
 
 def merge_duplicate_albums(output_root, log_cb=None):
     def log(m):
@@ -1105,7 +1104,6 @@ def merge_duplicate_albums(output_root, log_cb=None):
             log(f"  \U0001f500 Merging into: {artist_dir.name}/{winner.name}")
             for loser in losers:
                 log(f"      \u2190 absorbing: {loser.name}")
-                # Move all supported audio files (not just .mp3)
                 for src_file in collect_audio_files(loser):
                     dst_file = winner / Path(src_file).relative_to(loser)
                     dst_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1127,14 +1125,12 @@ def merge_duplicate_albums(output_root, log_cb=None):
     return merged_count
 
 
-# ── Process one file ──────────────────────────────────────────────────────────
+# ── Process one file ────────────────────────────────────────────────────────────────
 
 def _is_confident_match(mb_result, original_meta):
     """Check if MusicBrainz result is confident enough to overwrite existing tags."""
-    # Must have at least a release_id to be considered
     if not mb_result.get("release_id"):
         return False
-    # If both titles exist and differ, require album match too
     orig_title = original_meta.get("title", "").lower().strip()
     mb_title = mb_result.get("title", "").lower().strip()
     if orig_title and mb_title and orig_title != mb_title:
@@ -1150,7 +1146,7 @@ def process_file(path, dst, opts, stats, log_cb=None):
 
     ext = Path(path).suffix.lower()
     meta   = read_tags(path)
-    meta["_extension"] = ext  # preserve original format
+    meta["_extension"] = ext
     source = "tags"
 
     # 1. MusicBrainz
@@ -1214,19 +1210,20 @@ def process_file(path, dst, opts, stats, log_cb=None):
     if not meta.get("artist"): meta["artist"] = "Unknown Artist"
     if not meta.get("album"):  meta["album"]  = "Unknown Album"
 
-    # 4. Lyrics
+    # 4. Lyrics — read actual audio duration so LRCLIB can match correctly
     if opts.get("fetch_lyrics", True) and meta.get("artist") and meta.get("title"):
+        duration = _get_audio_duration(path)
         plain, synced = fetch_lyrics(
             meta["artist"], meta["title"],
-            meta.get("album", ""), 0)
+            meta.get("album", ""), duration)
         if plain or synced:
-            meta["_lyrics_plain"] = plain
+            meta["_lyrics_plain"]  = plain
             meta["_lyrics_synced"] = synced
             log("  \U0001f4dd Lyrics found")
         else:
             log("  \u2014 No lyrics available")
 
-    # 5. Album art — always fetch if release_id is known
+    # 5. Album art
     cover_bytes = None
     if opts.get("fetch_art", True) and meta.get("release_id"):
         log("  \U0001f5bc Fetching album art\u2026")
@@ -1236,7 +1233,7 @@ def process_file(path, dst, opts, stats, log_cb=None):
         else:
             log("  \u26a0 Album art not found in Cover Art Archive")
 
-    # 6. Write tags — write if metadata was enriched OR if lyrics/art were fetched
+    # 6. Write tags
     has_new_data = source != "tags" or meta.get("_lyrics_plain") or meta.get("_lyrics_synced") or cover_bytes
     if opts.get("write_tags", True) and has_new_data:
         try:
