@@ -171,7 +171,7 @@ class App(tk.Tk):
         opt = ttk.Frame(self)
         opt.pack(fill="x", padx=20, pady=6)
         checkboxes = [
-            (self._copy_mode,    "Keep originals",        "Move originals to output; uncheck to copy"),
+            (self._copy_mode,    "Keep originals",        "Copy files to output and leave sources untouched; uncheck to move"),
             (self._acoustid,     "Deep metadata lookup",   "Use AcoustID audio fingerprinting for untagged files"),
             (self._wtags,        "Save enriched tags",     "Write enriched metadata back to each file"),
             (self._fetch_art,    "Download album art",     "Download and embed cover art from MusicBrainz"),
