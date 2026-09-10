@@ -378,25 +378,45 @@ def fetch_lyrics(artist, title, album="", duration=0, retries=1):
 
 
 def _parse_lrc_to_sylt(lrc_text):
-    """Convert LRC-format lyrics string to SYLT-compatible list of (text, ms) tuples.
+    """Convert LRC-format lyrics to SYLT (text, milliseconds) tuples.
 
-    LRC format: [MM:SS.xx] lyric line
-    SYLT format: list of (str, int) where int is timestamp in milliseconds.
-    Lines with no timestamp (e.g. metadata tags like [ar:...]) are skipped.
+    Accepts common LRC timestamp shapes:
+      ``[MM:SS]``, ``[M:SS]``, ``[MM:SS.x]``, ``[MM:SS.xx]``, ``[MM:SS.xxx]``
+    Metadata tags such as ``[ar:...]`` are skipped.
+
+    Args:
+        lrc_text: Raw LRC string, or empty/None.
+
+    Returns:
+        List of ``(lyric_text, timestamp_ms)`` sorted by timestamp.
+
+    Examples:
+        >>> _parse_lrc_to_sylt("[00:12.50] hello")
+        [('hello', 12500)]
+        >>> _parse_lrc_to_sylt("[00:12] hello")
+        [('hello', 12000)]
     """
     if not lrc_text:
         return []
     result = []
-    lrc_re = re.compile(r'^\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)$')
+    # minutes (1-2 digits), seconds (1-2), optional .fraction (1-3)
+    lrc_re = re.compile(r'^\[(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?\](.*)$')
     for line in lrc_text.splitlines():
         m = lrc_re.match(line.strip())
         if not m:
             continue
-        minutes, seconds, centis, text = m.groups()
-        # Convert to milliseconds; centis may be 2 or 3 digits
-        cs_ms = int(centis) * (10 if len(centis) == 2 else 1)
-        ms = int(minutes) * 60_000 + int(seconds) * 1_000 + cs_ms
+        minutes, seconds, frac, text = m.groups()
+        frac = frac or "0"
+        # 1 digit → tenths, 2 → centiseconds, 3 → milliseconds
+        if len(frac) == 1:
+            frac_ms = int(frac) * 100
+        elif len(frac) == 2:
+            frac_ms = int(frac) * 10
+        else:
+            frac_ms = int(frac)
+        ms = int(minutes) * 60_000 + int(seconds) * 1_000 + frac_ms
         result.append((text.strip(), ms))
+    result.sort(key=lambda item: item[1])
     return result
 
 
