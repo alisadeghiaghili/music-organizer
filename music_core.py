@@ -27,6 +27,13 @@ from mutagen.wave import WAVE
 from mutagen.aiff import AIFF
 from mutagen.mp3 import MP3
 from config import get_config
+from matching import (
+    DEFAULT_ALBUM_MIN_SCORE,
+    DEFAULT_RECORDING_MIN_SCORE,
+    normalize_album_key as _normalize_album_key_unicode,
+    pick_best_recording,
+    select_best_release,
+)
 
 _cfg = get_config()
 
@@ -121,30 +128,43 @@ def mb_get(endpoint, params, retries=1):
     return None
 
 
-def _best_release(releases):
-    """Select the best release — prefer studio albums, then by recency."""
-    best, best_score = None, -1
-    for rel in releases:
-        date = rel.get("date", "")
-        year = int(date[:4]) if date and date[:4].isdigit() else 9999
-        rtype = rel.get("primary-type", "").lower()
-        secondary = [t.lower() for t in rel.get("secondary-types", [])]
+def _best_release(releases, desired_album=""):
+    """Select the best release using album-centric library policy.
 
-        type_score = 3 if rtype == "album" and not secondary else 1
-        if any(s in secondary for s in ("compilation", "greatest hits", "best of")):
-            type_score = 0
-        current_year = datetime.now().year
-        year_score = max(0, 30 - (current_year - year)) if year < 9999 else 0
-        score = type_score * 1000 + year_score
+    Delegates to matching.select_best_release (prefer oldest studio album;
+    prefer the user's album title).
 
-        if score > best_score:
-            best_score = score
-            best = rel
-    if best is None:
-        return None, 9999
-    year_str = best.get("date", "")
-    year = int(year_str[:4]) if year_str and year_str[:4].isdigit() else 9999
+    Args:
+        releases: MusicBrainz release list.
+        desired_album: Local album tag used as the primary target.
+
+    Returns:
+        Tuple ``(release_or_None, year_or_None)``.
+    """
+    best, year = select_best_release(releases, desired_album=desired_album or "")
     return best, year
+
+
+def _lucene_escape(value: str) -> str:
+    """Escape Lucene special characters in a MusicBrainz query term."""
+    specials = r'+-&|!(){}[]^"~*?:\/'
+    out = []
+    for ch in str(value or ""):
+        if ch in specials:
+            out.append("\\")
+        out.append(ch)
+    return "".join(out)
+
+
+def _mb_query_parts(artist, title, album=""):
+    parts = []
+    if title:
+        parts.append(f'recording:"{_lucene_escape(title)}"')
+    if artist:
+        parts.append(f'artist:"{_lucene_escape(artist)}"')
+    if album:
+        parts.append(f'release:"{_lucene_escape(album)}"')
+    return " AND ".join(parts)
 
 
 def _mb_genres(rec, rel):
@@ -165,61 +185,117 @@ def _mb_release_detail(release_id):
 
 
 def search_mb(artist, title, album=""):
-    """Search MusicBrainz for metadata. Uses fuzzy matching for better results."""
-    parts = []
-    if title:  parts.append(f'recording:{title}')
-    if artist: parts.append(f'artistname:{artist}')
-    if album:  parts.append(f'release:{album}')
-    if not parts:
-        return None
-    data = mb_get("recording",
-                  {"query": " AND ".join(parts), "limit": 5,
-                   "inc": "genres+tags+releases"})
-    if not data or not data.get("recordings"):
+    """Search MusicBrainz for metadata with album-centric scoring.
+
+    Strategy:
+      1. Query recordings (with album constraint when known).
+      2. Score all candidates and keep the best above threshold.
+      3. Score that recording's releases against the user's album tag;
+         prefer oldest studio album matching the desired album.
+      4. Never invent a track number from media[0].
+
+    Args:
+        artist: Local artist tag.
+        title: Local title tag.
+        album: Local album tag used both as query hint and release target.
+
+    Returns:
+        Metadata dict, or None when no candidate clears the acceptance bar.
+    """
+    if not (artist or title):
         return None
 
-    rec = data["recordings"][0]
+    recordings = []
+
+    def _search(query):
+        data = mb_get("recording", {
+            "query": query,
+            "limit": 10,
+            "inc": "genres+tags+releases",
+        })
+        if data and data.get("recordings"):
+            return data["recordings"]
+        return []
+
+    primary = _mb_query_parts(artist, title, album)
+    if primary:
+        recordings = _search(primary)
+    if not recordings and album:
+        # Album-constrained search can miss on remaster/deluxe tags.
+        fallback = _mb_query_parts(artist, title, "")
+        if fallback:
+            recordings = _search(fallback)
+    if not recordings and not album:
+        recordings = _search(_mb_query_parts(artist, title, ""))
+
+    if not recordings:
+        return None
+
+    rec, rec_score = pick_best_recording(
+        recordings,
+        query_artist=artist or "",
+        query_title=title or "",
+        query_album=album or "",
+        min_score=DEFAULT_RECORDING_MIN_SCORE,
+    )
+    if rec is None:
+        return None
+
     recording_id = rec.get("id", "")
+    credits = rec.get("artist-credit") or []
+    mb_artist = ""
+    if credits:
+        mb_artist = str((credits[0].get("artist") or {}).get("name") or "")
+
     result = {
         "title":        rec.get("title", ""),
-        "artist":       (rec["artist-credit"][0]["artist"]["name"]
-                         if rec.get("artist-credit") else artist),
+        "artist":       mb_artist or artist,
         "album":        "", "year": "", "track": "", "disc": "",
         "disc_total":   "", "total_tracks": "",
         "genres":       [], "label": "", "composer": "", "release_id": "",
+        "_recording_score": rec_score,
+        "_release_score": 0.0,
     }
-    releases = rec.get("releases", [])
+
+    releases = rec.get("releases") or []
     if releases:
-        rel, year = _best_release(releases)
+        rel, year = select_best_release(releases, desired_album=album or "")
         if rel is not None:
-            result["release_id"]   = rel.get("id", "")
-            result["album"]        = rel.get("title", album)
-            result["year"]         = str(year) if year != 9999 else ""
-            media = rel.get("media", [])
-            if media:
-                result["disc_total"] = str(len(media)) if len(media) > 1 else ""
+            release_score = 0.0
+            from matching import score_release_for_library, should_accept_release
+            release_score = score_release_for_library(
+                rel, desired_album=album or "", prefer_oldest=True
+            )
+            result["_release_score"] = release_score
+            # Album/year/track only when the release clears the bar, or when
+            # the user had no album tag (best-effort identification).
+            accept = should_accept_release(release_score, DEFAULT_ALBUM_MIN_SCORE)
+            if accept or not album:
+                result["release_id"] = rel.get("id", "")
+                result["album"] = rel.get("title", album)
+                result["year"] = str(year) if year is not None else ""
+                media = rel.get("media") or []
                 found_track = False
-                for medium in media:
-                    for track in medium.get("track", []):
-                        if track.get("recording", {}).get("id") == recording_id:
-                            if len(media) > 1:
-                                result["disc"] = str(medium.get("position", ""))
-                            result["track"] = str(track.get("number", ""))
-                            result["total_tracks"] = str(medium.get("track-count", ""))
-                            found_track = True
+                if media:
+                    result["disc_total"] = str(len(media)) if len(media) > 1 else ""
+                    for medium in media:
+                        for track in medium.get("track") or []:
+                            if track.get("recording", {}).get("id") == recording_id:
+                                if len(media) > 1:
+                                    result["disc"] = str(medium.get("position", ""))
+                                result["track"] = str(track.get("number", ""))
+                                result["total_tracks"] = str(
+                                    medium.get("track-count", "")
+                                )
+                                found_track = True
+                                break
+                        if found_track:
                             break
-                    if found_track:
-                        break
-                if not found_track and media:
-                    m0 = media[0]
-                    result["total_tracks"] = str(m0.get("track-count", ""))
-                    tracks = m0.get("track", [])
-                    if tracks:
-                        result["track"] = str(tracks[0].get("number", ""))
+                # Never fabricate track from media[0].
 
     detail = _mb_release_detail(result["release_id"])
     if detail:
-        lbl_info = detail.get("label-info", [])
+        lbl_info = detail.get("label-info") or []
         if lbl_info:
             result["label"] = (lbl_info[0].get("label") or {}).get("name", "")
         result["genres"] = _mb_genres(rec, detail)
@@ -454,7 +530,7 @@ def acoustid_lookup(filepath, api_key=None, retries=1):
     title  = rec.get("title", "")
     album, year, track, release_id = "", "", "", ""
     if rec.get("releases"):
-        rel, yr = _best_release(rec["releases"])
+        rel, yr = _best_release(rec["releases"], desired_album="")
         if rel is not None:
             release_id = rel.get("id", "")
             album = rel.get("title", "")
@@ -1047,8 +1123,8 @@ def safe(name, maxlen=None):
     return (SAFE_RE.sub("_", str(name)).strip(". ") or "Unknown")[:maxlen]
 
 def normalize_album_key(folder_name):
-    name = re.sub(r'^\d{4}\s*-\s*', '', folder_name).strip()
-    return re.sub(r'[^a-z0-9]', '', name.lower())
+    """Unicode-safe album folder key (see matching.normalize_album_key)."""
+    return _normalize_album_key_unicode(folder_name)
 
 def folder_score(folder_name):
     return 1 if re.match(r'^\d{4}\s*-\s*', folder_name) else 0

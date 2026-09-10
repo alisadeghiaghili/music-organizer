@@ -19,9 +19,12 @@ DEFAULTS = {
     "discogs_token": "",
 
     # Network
-    "user_agent": "MusicOrganizer/2.2 (github.com/alisadeghiaghili/music-organizer)",
+    "user_agent": "MusicOrganizer/2.3 (github.com/alisadeghiaghili/music-organizer)",
     "mb_rate_limit_seconds": 1.1,
     "request_timeout": 10,
+    "recording_min_score": 0.82,
+    "album_min_score": 55.0,
+    "prefer_oldest_release": True,
 
     # Processing
     "max_genre_count": 4,
