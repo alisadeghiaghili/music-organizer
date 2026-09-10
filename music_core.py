@@ -12,7 +12,7 @@ Features:
 """
 
 import os, re, sys, time, shutil, json, subprocess, urllib.request, urllib.parse, threading, base64, hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from mutagen import File as MutagenFile
 from mutagen.id3 import (
@@ -1081,12 +1081,93 @@ def collect_mp3s(folder):
     return collect_audio_files(folder)
 
 
+# ── Journal ───────────────────────────────────────────────────────────────────────────
+
+JOURNAL_FILENAME = "organize-journal.jsonl"
+
+
+def journal_append(output_root, action, src=None, dst=None, extra=None):
+    """Append one filesystem-mutation record to the output journal.
+
+    Args:
+        output_root: Directory that owns ``organize-journal.jsonl``.
+        action: One of ``copy``, ``move``, ``tag``, ``merge``, ``skip``.
+        src: Source path (optional).
+        dst: Destination path (optional).
+        extra: Optional dict of additional JSON-serializable fields.
+
+    Returns:
+        Path to the journal file.
+
+    Examples:
+        >>> journal_append("/tmp/out", "copy", src="a.mp3", dst="/tmp/out/a.mp3")
+        PosixPath('/tmp/out/organize-journal.jsonl')
+    """
+    root = Path(output_root)
+    root.mkdir(parents=True, exist_ok=True)
+    journal_path = root / JOURNAL_FILENAME
+    entry = {
+        "ts": datetime.now(tz=timezone.utc)
+        .replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "action": action,
+    }
+    if src is not None:
+        entry["src"] = str(src)
+    if dst is not None:
+        entry["dst"] = str(dst)
+    if extra:
+        entry.update(extra)
+    with open(journal_path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return journal_path
+
+
+def _merge_tree(src_dir, dst_dir, log):
+    """Move every file/dir under src_dir into dst_dir without deleting data.
+
+    Existing destination files are skipped (source file is left in place).
+    """
+    moved = 0
+    for item in sorted(src_dir.iterdir()):
+        target = dst_dir / item.name
+        if item.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            moved += _merge_tree(item, target, log)
+            try:
+                item.rmdir()
+            except OSError:
+                pass
+            continue
+        if target.exists():
+            log(f"      ! skipped (exists): {item.name}")
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(item), str(target))
+        moved += 1
+    return moved
+
+
 # ── Duplicate album merge ────────────────────────────────────────────────────────────
 
-def merge_duplicate_albums(output_root, log_cb=None):
+def merge_duplicate_albums(output_root, log_cb=None, journal=True):
+    """Merge album folders that normalize to the same key.
+
+    Moves the entire folder contents (audio, covers, cue/log/nfo sidecars)
+    into the winner directory, then removes the emptied loser directory.
+
+    Args:
+        output_root: Library root containing ``Artist/Album`` folders.
+        log_cb: Optional callable(str) for progress messages.
+        journal: When True, record each merge in ``organize-journal.jsonl``.
+
+    Returns:
+        Number of loser folders merged (removed).
+    """
     def log(m):
         if log_cb: log_cb(m)
     output_root  = Path(output_root)
+    if not output_root.exists():
+        return 0
     merged_count = 0
     for artist_dir in sorted(output_root.iterdir()):
         if not artist_dir.is_dir(): continue
@@ -1104,22 +1185,23 @@ def merge_duplicate_albums(output_root, log_cb=None):
             log(f"  \U0001f500 Merging into: {artist_dir.name}/{winner.name}")
             for loser in losers:
                 log(f"      \u2190 absorbing: {loser.name}")
-                for src_file in collect_audio_files(loser):
-                    dst_file = winner / Path(src_file).relative_to(loser)
-                    dst_file.parent.mkdir(parents=True, exist_ok=True)
-                    if not dst_file.exists():
-                        shutil.move(str(src_file), str(dst_file))
-                    else:
-                        log(f"      ! skipped (exists): {dst_file.name}")
-                for src_img in loser.glob("cover.*"):
-                    dst_img = winner / src_img.name
-                    if not dst_img.exists():
-                        shutil.move(str(src_img), str(dst_img))
                 try:
+                    _merge_tree(loser, winner, log)
+                    # Remove any leftover skipped files? Leave them — do not rmtree data.
+                    leftover = [p.name for p in loser.rglob("*") if p.is_file()]
+                    if leftover:
+                        log(f"      ! kept in place (name conflicts): {len(leftover)} file(s)")
+                        continue
                     shutil.rmtree(str(loser))
                     merged_count += 1
+                    if journal:
+                        journal_append(
+                            output_root, "merge",
+                            src=str(loser), dst=str(winner),
+                            extra={"artist": artist_dir.name, "key": key},
+                        )
                 except Exception as e:
-                    log(f"      ! could not remove {loser.name}: {e}")
+                    log(f"      ! could not merge {loser.name}: {e}")
     log(f"  \u2705 Merged {merged_count} duplicate album folder(s)"
         if merged_count else "  \u2705 No duplicate album folders found")
     return merged_count
@@ -1141,8 +1223,34 @@ def _is_confident_match(mb_result, original_meta):
 
 
 def process_file(path, dst, opts, stats, log_cb=None):
+    """Enrich metadata and place one audio file under ``dst``.
+
+    Safety contract (Phase A):
+      * ``dry_run`` performs network lookups only — zero filesystem writes.
+      * Source file tags are never rewritten. Enriched tags are written to
+        the destination copy after copy/move.
+      * When ``opts['journal']`` is true (default), copy/move/tag/merge are
+        recorded in ``dst/organize-journal.jsonl``.
+
+    Args:
+        path: Absolute path of the source audio file.
+        dst: Output library root.
+        opts: Processing options (copy, dry_run, write_tags, fetch_*, journal, ...).
+        stats: Mutable dict with ``ok``/``skipped``/``errors`` counters.
+        log_cb: Optional callable(str) logger.
+
+    Returns:
+        Tuple ``(meta, source, status, dest_path)``.
+    """
     def log(msg):
         if log_cb: log_cb(msg)
+
+    def jour(action, src=None, dest=None, extra=None):
+        if opts.get("journal", True) and not opts.get("dry_run", False):
+            try:
+                journal_append(dst, action, src=src, dst=dest, extra=extra)
+            except Exception as e:
+                log(f"  ! journal write failed: {e}")
 
     ext = Path(path).suffix.lower()
     meta   = read_tags(path)
@@ -1165,12 +1273,12 @@ def process_file(path, dst, opts, stats, log_cb=None):
                 meta["genres"] = mb["genres"]
             source = "MusicBrainz"
             gstr = f" [{', '.join(meta['genres'][:2])}]" if meta.get("genres") else ""
-            log(f"  \u2713 Identified: {meta.get('artist')} \u2014 {meta.get('title')}{gstr}")
+            log(f"  ✓ Identified: {meta.get('artist')} — {meta.get('title')}{gstr}")
 
     # 2. AcoustID fingerprint fallback
     if source == "tags" and opts.get("acoustid", True):
         if find_fpcalc():
-            log("  \u27f3 Fingerprinting audio\u2026")
+            log("  ⟳ Fingerprinting audio…")
             ac = acoustid_lookup(path)
             if ac:
                 confident = _is_confident_match(ac, meta)
@@ -1182,7 +1290,7 @@ def process_file(path, dst, opts, stats, log_cb=None):
                         else:
                             meta[k] = ac[k]
                 source = "AcoustID"
-                log(f"  \u2713 Identified: {meta.get('artist')} \u2014 {meta.get('title')}")
+                log(f"  ✓ Identified: {meta.get('artist')} — {meta.get('title')}")
                 if meta.get("release_id") and not meta.get("genres"):
                     detail = _mb_release_detail(meta["release_id"])
                     if detail:
@@ -1194,23 +1302,23 @@ def process_file(path, dst, opts, stats, log_cb=None):
                         if lbl_info and not meta.get("label"):
                             meta["label"] = (lbl_info[0].get("label") or {}).get("name", "")
         else:
-            log("  \u26a0 Fingerprinting unavailable \u2014 using basic lookup")
+            log("  ⚠ Fingerprinting unavailable — using basic lookup")
 
     # 3. Last.fm genre fallback
     if not meta.get("genres") and meta.get("artist") and meta.get("title"):
         lfm = lastfm_genres(meta["artist"], meta["title"])
         if lfm:
             meta["genres"] = lfm
-            log(f"  \u2713 Genres found: {', '.join(lfm)}")
+            log(f"  ✓ Genres found: {', '.join(lfm)}")
 
     if source == "tags":
-        log("  \u2717 Could not identify \u2014 using existing tags")
+        log("  ✗ Could not identify — using existing tags")
 
     if not meta.get("title"):  meta["title"]  = Path(path).stem
     if not meta.get("artist"): meta["artist"] = "Unknown Artist"
     if not meta.get("album"):  meta["album"]  = "Unknown Album"
 
-    # 4. Lyrics — read actual audio duration so LRCLIB can match correctly
+    # 4. Lyrics
     if opts.get("fetch_lyrics", True) and meta.get("artist") and meta.get("title"):
         duration = _get_audio_duration(path)
         plain, synced = fetch_lyrics(
@@ -1219,55 +1327,67 @@ def process_file(path, dst, opts, stats, log_cb=None):
         if plain or synced:
             meta["_lyrics_plain"]  = plain
             meta["_lyrics_synced"] = synced
-            log("  \U0001f4dd Lyrics found")
+            log("  📝 Lyrics found")
         else:
-            log("  \u2014 No lyrics available")
+            log("  — No lyrics available")
 
-    # 5. Album art
+    # 5. Album art (network only; disk write after dry_run gate)
     cover_bytes = None
     if opts.get("fetch_art", True) and meta.get("release_id"):
-        log("  \U0001f5bc Fetching album art\u2026")
+        log("  🖼 Fetching album art…")
         cover_bytes = fetch_cover_art(meta["release_id"])
         if cover_bytes:
-            log(f"  \u2713 Album art fetched ({len(cover_bytes)//1024} KB)")
+            log(f"  ✓ Album art fetched ({len(cover_bytes)//1024} KB)")
         else:
-            log("  \u26a0 Album art not found in Cover Art Archive")
+            log("  ⚠ Album art not found in Cover Art Archive")
 
-    # 6. Write tags
-    has_new_data = source != "tags" or meta.get("_lyrics_plain") or meta.get("_lyrics_synced") or cover_bytes
-    if opts.get("write_tags", True) and has_new_data:
-        try:
-            write_tags(path, meta, cover_bytes=cover_bytes)
-        except Exception as e:
-            log(f"  ! Tag write failed: {e}")
-
-    # 7. Copy / move
     dest = destination(dst, meta)
 
+    # 6. DRY RUN — stop before any filesystem mutation
     if opts.get("dry_run", False):
         stats["ok"] += 1
-        log(f"  [DRY] \u2192 {dest}")
+        log(f"  [DRY] → {dest}")
         return meta, source, "dry-run", str(dest)
 
+    # 7. Copy / move first (source stays immutable in copy mode)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    status = "ok"
+    if dest.exists() and not opts.get("overwrite", False):
+        status = "skipped"; stats["skipped"] += 1
+        log(f"  ↷ Skipped (exists): {dest.name}")
+        jour("skip", src=path, dest=dest)
+        return meta, source, status, str(dest)
 
+    try:
+        (shutil.copy2 if opts.get("copy", True) else shutil.move)(path, dest)
+        stats["ok"] += 1
+        log(f"  → {dest}")
+        jour("copy" if opts.get("copy", True) else "move", src=path, dest=dest)
+    except Exception as e:
+        status = "error"; stats["errors"] += 1
+        log(f"  ✗ Error: {e}")
+        return meta, source, status, str(dest)
+
+    # 8. Write enriched tags onto the DESTINATION only
+    has_new_data = (
+        source != "tags"
+        or meta.get("_lyrics_plain")
+        or meta.get("_lyrics_synced")
+        or cover_bytes
+    )
+    if opts.get("write_tags", True) and has_new_data:
+        try:
+            write_tags(dest, meta, cover_bytes=cover_bytes)
+            jour("tag", src=path, dest=dest)
+        except Exception as e:
+            log(f"  ! Tag write failed: {e}")
+            stats["errors"] += 1
+
+    # 9. Folder cover next to destination
     if cover_bytes:
         saved = save_folder_cover(dest.parent, cover_bytes,
                                   overwrite=opts.get("overwrite_art", False))
         if saved:
-            log(f"  \U0001f5bc cover.jpg \u2192 {dest.parent.name}/")
-
-    status = "ok"
-    if dest.exists() and not opts.get("overwrite", False):
-        status = "skipped"; stats["skipped"] += 1
-        log(f"  \u21b7 Skipped (exists): {dest.name}")
-    else:
-        try:
-            (shutil.copy2 if opts.get("copy", True) else shutil.move)(path, dest)
-            stats["ok"] += 1
-            log(f"  \u2192 {dest}")
-        except Exception as e:
-            status = "error"; stats["errors"] += 1
-            log(f"  \u2717 Error: {e}")
+            log(f"  🖼 cover.jpg → {dest.parent.name}/")
 
     return meta, source, status, str(dest)

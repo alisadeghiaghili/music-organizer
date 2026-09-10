@@ -19,7 +19,7 @@ DEFAULTS = {
     "discogs_token": "",
 
     # Network
-    "user_agent": "MusicOrganizer/2.0 (github.com/alisadeghiaghili/music-organizer)",
+    "user_agent": "MusicOrganizer/2.2 (github.com/alisadeghiaghili/music-organizer)",
     "mb_rate_limit_seconds": 1.1,
     "request_timeout": 10,
 
