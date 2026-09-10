@@ -363,7 +363,7 @@ def interactive():
 
 # ── CLI argument parser ───────────────────────────────────────────────────────
 
-__version__ = "2.3.0"
+from music_organizer import __version__
 
 def main():
     p = argparse.ArgumentParser(
