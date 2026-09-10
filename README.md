@@ -16,7 +16,9 @@ Automatically organize your music library by enriching metadata from online sour
 | **Genre enrichment** | Pulls genre tags from MusicBrainz + optional Last.fm fallback |
 | **Lyrics fetching** | Downloads synced lyrics from LRCLIB (free, no API key required) |
 | **Duplicate album merge** | Detects and merges split album folders after organizing |
-| **Original release year** | Always picks the oldest known release date |
+| **Original release year** | Prefers the oldest studio album; remasters only if your tag names them |
+| **Album-centric matching** | Scores MusicBrainz candidates; keeps your album tag when the online match is weak |
+| **Unicode-safe merge keys** | Persian/Arabic/CJK album folders no longer collapse into one bucket |
 | **Rich metadata written to tags** | Saves enriched metadata back to each file in its native format |
 | **GUI frontend** | Tkinter-based dark UI with Scan / Organize workflow, Pause/Resume/Stop |
 | **CLI frontend** | Rich-powered terminal UI with interactive mode and full argument support |

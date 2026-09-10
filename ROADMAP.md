@@ -1,6 +1,6 @@
 # Music Organizer — Engineering Roadmap
 
-وضعیت فعلی: **v2.2.0** (Phase A done)  
+وضعیت فعلی: **v2.3.0** (Phase A+B done)  
 هدف نهایی: ابزار سازمان‌دهی موسیقی production-grade، multi-format، امن برای library واقعی  
 رویکرد: **TDD** · **Clean Architecture** · **PRهایی در مقیاس ~یک هفته کار انسانی**
 

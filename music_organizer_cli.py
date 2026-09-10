@@ -363,7 +363,7 @@ def interactive():
 
 # ── CLI argument parser ───────────────────────────────────────────────────────
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 
 def main():
     p = argparse.ArgumentParser(

@@ -4,6 +4,29 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.3.0] — 2026-07-24
+
+### Added
+
+- **`matching.py`** — pure, typed helpers for recording/release scoring and Unicode album keys
+- **Album-centric MusicBrainz search** — scores up to 10 recording candidates; falls back when the album-constrained query misses
+- **Release policy** — prefers the user's album title, then studio albums, then the **oldest** release year (matches README)
+- **Acceptance thresholds** — `recording_min_score=0.82`, `album_min_score=55.0` (config keys reserved)
+
+### Fixed
+
+- **Release year policy** — no longer prefers the newest remaster; oldest studio album wins
+- **Track numbers are never fabricated** — `media[0].track[0]` fallback removed; track stays empty unless the recording id matches
+- **`normalize_album_key` is Unicode-safe** — Persian/Arabic/CJK album names no longer collapse into one empty merge bucket
+- **Lucene query escaping** — quotes and special characters in artist/title/album terms
+
+### Tests
+
+- `tests/test_matching.py` — release policy, recording score, Unicode keys
+- `tests/test_search_mb.py` — oldest studio, no fake track, album-query fallback, best-of-N candidates
+
+---
+
 ## [2.2.0] — 2026-07-24
 
 ### Fixed (data-safety)
