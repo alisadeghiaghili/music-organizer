@@ -1,10 +1,10 @@
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "music-organizer"
-version = "2.3.0"
+version = "2.4.0"
 description = "Automatically organize your music library with online metadata and audio fingerprinting"
 readme = "README.md"
 license = {text = "MIT"}
@@ -24,12 +24,19 @@ dev = [
 music-organizer = "music_organizer_cli:main"
 music-organizer-gui = "music_organizer_gui:main"
 
+[tool.setuptools]
+py-modules = ["music_core", "config", "matching", "fpcalc_installer", "music_organizer_cli", "music_organizer_gui"]
+
+[tool.setuptools.packages.find]
+include = ["music_organizer*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+pythonpath = ["."]
 
 [tool.coverage.run]
-source = ["music_core", "config"]
+source = ["music_core", "config", "matching", "music_organizer"]
 omit = ["tests/*"]
 
 [tool.coverage.report]
