@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.4.0] — 2026-07-24
+
+### Fixed
+
+- **LRC timestamp parser** — accepts `[MM:SS]`, `[M:SS]`, `[MM:SS.x]`, `[MM:SS.xx]`, `[MM:SS.xxx]` (previously only `[MM:SS.xx|xxx]`)
+- Synced lyrics now survive common LRCLIB / player timestamp variants and are sorted by time
+
+### Added
+
+- **`tests/test_lyrics.py`** — LRC parse matrix, cache hit/miss, MP3 USLT+SYLT write, FLAC lyrics tag, end-to-end `process_file` lyric write
+- **`music_organizer` package skeleton** — `__version__` single-sourced in `__about__.py`; `domain.matching` extracted; root `matching.py` kept as compatibility shim
+- **Packaging** — correct `setuptools.build_meta` backend (was broken `_legacy:_Backend`)
+
+### Changed
+
+- CLI `--version` reads `music_organizer.__version__`
+
+---
+
 ## [2.3.0] — 2026-07-24
 
 ### Added
