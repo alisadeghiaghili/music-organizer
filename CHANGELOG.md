@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.2.0] — 2026-07-24
+
+### Fixed (data-safety)
+
+- **`--preview` / `dry_run` is side-effect free** — no longer writes tags, covers, copies, merges, or journal entries. Previously tags were written to source files *before* the dry-run check.
+- **Source files are never tag-rewritten** — enriched metadata is written only to the destination after copy/move.
+- **Album merge preserves sidecars** — `.cue`, `.log`, `.nfo`, and any other non-audio files are moved with the album; `rmtree` only runs after a fully absorbed folder. Name conflicts keep the loser folder instead of deleting data.
+
+### Added
+
+- **Journal** — `organize-journal.jsonl` in the output root records `copy` / `move` / `tag` / `merge` / `skip` actions (disable with `opts['journal']=False`).
+- **Safety test suite** (`tests/test_safety.py`) — dry-run purity, source immutability, merge sidecars, journal.
+
+### Changed
+
+- GUI tooltip for “Keep originals” now matches actual copy/move behavior (was inverted).
+
+---
+
 ## [2.1.0] — 2026-07-24
 
 ### Added

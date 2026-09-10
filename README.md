@@ -21,7 +21,10 @@ Automatically organize your music library by enriching metadata from online sour
 | **GUI frontend** | Tkinter-based dark UI with Scan / Organize workflow, Pause/Resume/Stop |
 | **CLI frontend** | Rich-powered terminal UI with interactive mode and full argument support |
 | **Copy or Move mode** | Keep your originals or move files; overwrite or skip duplicates |
-| **Dry-run / Preview** | See exactly what would happen without touching any files |
+| **Dry-run / Preview** | Network lookups only — zero filesystem writes (tags, copies, merge, journal) |
+| **Source immutability** | Copy mode never rewrites tags on your originals; tags go to the destination |
+| **Merge journal** | `organize-journal.jsonl` records copy/move/tag/merge for undo/audit |
+| **Safe album merge** | Sidecars (`.cue`, `.log`, `.nfo`, …) move with the album; no silent `rmtree` |
 | **Centralized configuration** | `~/.music-organizer/config.json` with environment variable overrides |
 
 ---
@@ -177,7 +180,7 @@ set MUSIC_ORG_LASTFM_API_KEY=your_key_here
 |---|---|---|
 | `acoustid_api_key` | (built-in) | AcoustID API key for fingerprinting |
 | `lastfm_api_key` | (empty) | Last.fm API key for genre enrichment |
-| `user_agent` | `MusicOrganizer/2.0 (...)` | User-Agent for API requests |
+| `user_agent` | `MusicOrganizer/2.2 (...)` | User-Agent for API requests |
 | `mb_rate_limit_seconds` | `1.1` | Minimum gap between MusicBrainz requests |
 | `output_template` | `{artist}/{year} - {album}/{track} - {title}.mp3` | Output path template |
 | `supported_extensions` | `.mp3,.flac,.ogg,.m4a,.wav,...` | Audio file extensions to process |
