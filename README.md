@@ -14,7 +14,7 @@ Automatically organize your music library by enriching metadata from online sour
 | **Auto-installs fingerprinting tool** | Downloads and sets up the audio fingerprinting binary on demand (~2 MB) |
 | **Album art** | Downloads and embeds cover art; saves `cover.jpg` in each album folder |
 | **Genre enrichment** | Pulls genre tags from MusicBrainz + optional Last.fm fallback |
-| **Lyrics fetching** | Downloads synced lyrics from LRCLIB (free, no API key required) |
+| **Lyrics fetching** | LRCLIB synced+plain lyrics → USLT/SYLT (MP3), `lyrics` (FLAC/OGG/M4A); accepts common LRC timestamp forms |
 | **Duplicate album merge** | Detects and merges split album folders after organizing |
 | **Original release year** | Prefers the oldest studio album; remasters only if your tag names them |
 | **Album-centric matching** | Scores MusicBrainz candidates; keeps your album tag when the online match is weak |
