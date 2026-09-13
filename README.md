@@ -1,5 +1,9 @@
 # Music Organizer
 
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-4a6fb0?logo=apache&logoColor=white)](https://www.apache.org/licenses/LICENSE-2.0)
+[![Tests](https://github.com/alisadeghiaghili/music-organizer/actions/workflows/test.yml/badge.svg)](https://github.com/alisadeghiaghili/music-organizer/actions/workflows/test.yml)
+[![Python](https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
+
 Automatically organize your music library by enriching metadata from online sources and audio fingerprinting — then sort everything into a clean folder structure.
 
 ---
@@ -238,4 +242,4 @@ Output/
 
 ## License
 
-MIT
+Apache License 2.0 — see [LICENSE](LICENSE).
