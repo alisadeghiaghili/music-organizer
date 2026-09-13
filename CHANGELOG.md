@@ -4,6 +4,41 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.4.3] — 2026-09-13
+
+### Fixed
+
+- **Responsive results table** — the table had no horizontal scrollbar, so the
+  right-hand columns (Art, Year, Track) were unreachable whenever the window was
+  narrow. A slim horizontal scrollbar is now paired with the vertical one, so
+  wide tables scroll in both directions on any window size.
+- **Stray characters no longer split an artist into two folders** — an artist
+  whose name picked up a bracket, stray mark, or a parenthetical annotation
+  (e.g. `Shajarian (فرض)` vs `Shajarian`) used to be filed under two separate
+  top-level folders. The new `normalize_artist_key` folds case, spacing,
+  punctuation, and bracketed annotations, so such variants collapse to one
+  folder during the post-organize merge (`merge_duplicate_artists`).
+- **Duplicated track numbers in filenames** — a title tag (or a ripped filename
+  stem) that already carried a leading `01 -` prefix produced a doubled number
+  in the output name (`03 - 03 - Song.mp3`). The redundant prefix is now
+  stripped; the filename is always `NN - Title` where `NN` is the real album
+  track number from the `TRACK` tag.
+
+### Added
+
+- **Browse buttons on both folder rows** — the Source and Output folder fields
+  each now have a Browse button, so you can pick either folder without
+  retyping its path.
+- **Standalone GUI in releases** — in addition to the per-platform zips, the
+  release workflow now also attaches the bare, unzipped GUI binary
+  (`MusicOrganizer-GUI.exe` on Windows, `MusicOrganizer-GUI` on macOS) so you
+  can grab the GUI without unzipping.
+- **Tests** — `normalize_artist_key` and `strip_track_prefix` coverage in
+  `test_matching.py` / `test_music_core.py`, plus `merge_duplicate_artists`
+  safety tests and an end-to-end no-double-prefix check in `test_safety.py`.
+
+---
+
 ## [2.4.2] — 2026-09-13
 
 ### Changed

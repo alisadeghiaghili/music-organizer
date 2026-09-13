@@ -4,7 +4,7 @@
 import os, sys, threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from music_core import collect_audio_files, read_tags, process_file, merge_duplicate_albums, fpcalc_status
+from music_core import collect_audio_files, read_tags, process_file, merge_duplicate_albums, merge_duplicate_artists, fpcalc_status
 from fpcalc_installer import download_fpcalc
 from config import get_config
 
@@ -527,6 +527,9 @@ class App(tk.Tk):
                          highlightthickness=1, highlightbackground=t["surface2"],
                          highlightcolor=t["accent"], disabledbackground=t["surface2"])
             e.grid(row=i, column=1, sticky="ew", pady=5, ipady=4)
+            b = CButton(fcard, "Browse", cb, variant="secondary",
+                        theme=t, bg=t["surface"], width=96)
+            b.grid(row=i, column=2, sticky="e", padx=(10, 0), pady=5)
         fcard.columnconfigure(1, weight=1)
 
         # ── option cards (toggles, not checkboxes) ─────────────────────────
@@ -614,14 +617,18 @@ class App(tk.Tk):
             self._tree.heading(cid, text=label, anchor="w",
                                command=lambda c=cid: self._sort_by_column(c))
             self._tree.column(cid, width=width, anchor=anchor)
-        # Only a slim vertical scrollbar is shown; the columns (≈1070px) scroll
-        # horizontally via native means — mouse wheel while hovering, Shift+wheel,
-        # and touchpad two-finger pan — instead of a cluttering bar at the bottom.
+        # Both a slim vertical and a slim horizontal scrollbar are shown so the
+        # full set of columns stays reachable whenever the window is narrower
+        # than the columns. (Wheel / Shift+wheel / touchpad panning still work
+        # on top of the bar via _bind_native_hscroll.)
         vsb = ttk.Scrollbar(tf, orient="vertical", command=self._tree.yview,
                             style="Slim.Vertical.TScrollbar")
-        self._tree.configure(yscrollcommand=vsb.set)
+        hsb = ttk.Scrollbar(tf, orient="horizontal", command=self._tree.xview,
+                            style="Slim.Horizontal.TScrollbar")
+        self._tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         self._tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
         tf.rowconfigure(0, weight=1)
         tf.columnconfigure(0, weight=1)
         # Empty-state overlay: shown over the (empty) table with a rotating
@@ -1012,7 +1019,9 @@ class App(tk.Tk):
             self.after(0, _update)
 
         if do_merge and not opts.get("dry_run") and not self._stop_flag.is_set():
-            self._setstatus("Merging duplicate albums…")
+            self._setstatus("Merging duplicate folders…")
+            # Artists first (folds split artist folders), then albums.
+            merge_duplicate_artists(dst, log_cb=self._logmsg)
             merge_duplicate_albums(dst, log_cb=self._logmsg)
 
         summary = f"Done — ✓ {stats['ok']}  ↷ {stats['skipped']}  ✗ {stats['errors']}"

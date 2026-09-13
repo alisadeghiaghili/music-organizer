@@ -34,6 +34,8 @@ _SECONDARY_PENALTY = {
 _YEAR_PREFIX_RE = re.compile(r"^\d{3,4}\s*-\s*")
 _PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _SPACE_RE = re.compile(r"\s+", re.UNICODE)
+# Parenthetical/square/curly annotations, e.g. "(Live)", "[remix]", "{ed.}".
+_BRACKET_CONTENT_RE = re.compile(r"[\(\[\{][^\)\]\}]*[\)\]\}]")
 
 
 def normalize_album_key(folder_name: str) -> str:
@@ -59,6 +61,17 @@ def normalize_album_key(folder_name: str) -> str:
     name = _YEAR_PREFIX_RE.sub("", str(folder_name)).strip()
     if not name:
         return ""
+    return _fold_key(name)
+
+
+def _fold_key(name: str) -> str:
+    """Fold a name into a merge key.
+
+    NFKC + casefold, drop every punctuation/bracket character (so "()" "[]"
+    "{}" and stray marks can't split a folder), collapse whitespace, and drop
+    the remaining spaces. Keeps Unicode letters so distinct non-ASCII names
+    stay distinct. Symbol-only names fall back to a stable escaped key.
+    """
     folded = unicodedata.normalize("NFKC", name).casefold()
     folded = _PUNCT_RE.sub(" ", folded)
     folded = _SPACE_RE.sub(" ", folded).strip()
@@ -66,6 +79,41 @@ def normalize_album_key(folder_name: str) -> str:
         # Keep distinct identity for symbol-only names.
         return "sym_" + re.sub(r"[^0-9a-z]+", "", name.casefold())[:16] or "sym"
     return folded.replace(" ", "")
+
+
+def normalize_artist_key(artist_name: str) -> str:
+    """Normalize an artist folder name into a merge key.
+
+    Two artist folders that differ only by case, spacing, stray punctuation,
+    or a parenthetical annotation ("Shajarian" vs "Shajarian (فرض)") collapse
+    to one key, so the same artist is never split across folders. The fold is
+    Unicode-preserving, so genuinely distinct names ("Raha Derakhsh" vs
+    "Raha") stay separate.
+
+    Unlike :func:`normalize_album_key`, parenthetical content is *dropped*
+    (not just de-punctuated): for an artist, "…" annotations are filing noise,
+    whereas for an album "… (Deluxe)" can be a distinct release.
+
+    Args:
+        artist_name: Artist folder name.
+
+    Returns:
+        Lowercased, punctuation-free key. Empty only when the input is
+        empty/whitespace.
+
+    Examples:
+        >>> normalize_artist_key("Metallica (feat. X)")
+        'metallica'
+        >>> normalize_artist_key("شجریان")
+        'شجریان'
+    """
+    name = str(artist_name).strip()
+    if not name:
+        return ""
+    # Drop parenthetical annotations — "Artist (Live)" and "Artist" are the
+    # same artist for filing purposes.
+    name = _BRACKET_CONTENT_RE.sub(" ", name)
+    return _fold_key(name)
 
 
 def _year_from_release(release: Mapping[str, Any]) -> int | None:

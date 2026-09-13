@@ -9,8 +9,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from music_core import (
-    safe, normalize_album_key, folder_score, destination,
+    safe, normalize_album_key, normalize_artist_key, folder_score, destination,
     collect_audio_files, collect_mp3s, read_tags,
+    strip_track_prefix, merge_duplicate_artists,
 )
 
 
@@ -54,6 +55,40 @@ class TestNormalizeAlbumKey:
 
     def test_no_year(self):
         assert normalize_album_key("Greatest Hits") == "greatesthits"
+
+
+class TestNormalizeArtistKey:
+    def test_brackets_do_not_split_artist(self):
+        assert normalize_artist_key("Shajarian") == normalize_artist_key("Shajarian (فرض)")
+
+    def test_case_space_insensitive(self):
+        assert normalize_artist_key("Metallica") == normalize_artist_key(" metallica ")
+
+    def test_distinct_artists(self):
+        assert normalize_artist_key("Raha Derakhsh") != normalize_artist_key("Raha")
+
+
+class TestStripTrackPrefix:
+    def test_dashes(self):
+        assert strip_track_prefix("01 - Song") == "Song"
+        assert strip_track_prefix("1 - Song") == "Song"
+
+    def test_dot_and_paren(self):
+        assert strip_track_prefix("3. Intro") == "Intro"
+        assert strip_track_prefix("12) Outro") == "Outro"
+
+    def test_em_dash(self):
+        assert strip_track_prefix("07 — Title") == "Title"
+
+    def test_leading_number_without_separator_kept(self):
+        # A title that just starts with a number is left alone.
+        assert strip_track_prefix("8 Mile") == "8 Mile"
+        assert strip_track_prefix("1969") == "1969"
+
+    def test_idempotent_and_empty(self):
+        assert strip_track_prefix("") == ""
+        once = strip_track_prefix("01 - Song")
+        assert strip_track_prefix(once) == "Song"
 
 
 class TestFolderScore:

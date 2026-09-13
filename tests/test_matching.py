@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from matching import (
     normalize_album_key,
+    normalize_artist_key,
     score_recording_match,
     score_release_for_library,
     select_best_release,
@@ -217,3 +218,37 @@ class TestNormalizeAlbumKeyUnicode:
         a = normalize_album_key("!!!")
         b = normalize_album_key("???")
         assert a != b or (a != "" and b != "")
+
+
+# ── Unicode artist key ────────────────────────────────────────────────────────
+
+
+class TestNormalizeArtistKey:
+    def test_brackets_do_not_split_artist(self):
+        # A stray bracket in the name must not create a second artist folder.
+        a = normalize_artist_key("Shajarian")
+        b = normalize_artist_key("Shajarian (فرض)")
+        assert a == b
+
+    def test_case_and_space_insensitive(self):
+        assert normalize_artist_key("Metallica") == normalize_artist_key("metallica ")
+        assert normalize_artist_key("ABBA") == normalize_artist_key("Abba")
+
+    def test_distinct_artists_stay_distinct(self):
+        assert normalize_artist_key("Raha Derakhsh") != normalize_artist_key("Raha")
+
+    def test_punctuation_stripped(self):
+        # Punctuation is dropped; without a bracket, letters are kept.
+        assert normalize_artist_key("R.E.M.") == normalize_artist_key("R E M")
+
+    def test_parenthetical_dropped(self):
+        # An annotation in brackets is filing noise for an artist.
+        assert normalize_artist_key("Metallica (feat. X)") == normalize_artist_key("Metallica")
+
+    def test_persian_preserved(self):
+        a = normalize_artist_key("شجریان")
+        assert a == "شجریان"
+        assert a != normalize_artist_key("دیگران")
+
+    def test_empty(self):
+        assert normalize_artist_key("   ") == ""

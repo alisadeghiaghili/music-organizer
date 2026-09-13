@@ -19,10 +19,11 @@ Automatically organize your music library by enriching metadata from online sour
 | **Album art** | Downloads and embeds cover art; saves `cover.jpg` in each album folder |
 | **Genre enrichment** | Pulls genre tags from MusicBrainz + optional Last.fm fallback |
 | **Lyrics fetching** | LRCLIB synced+plain lyrics → USLT/SYLT (MP3), `lyrics` (FLAC/OGG/M4A); accepts common LRC timestamp forms |
-| **Duplicate album merge** | Detects and merges split album folders after organizing |
+| **Duplicate folder merge** | Detects and merges split **artist** and **album** folders after organizing — stray brackets, case, or punctuation no longer duplicate an artist |
+| **Clean track numbers** | Strips a redundant leading `NN -` prefix so the filename is always `NN - Title` from the real `TRACK` tag |
 | **Original release year** | Prefers the oldest studio album; remasters only if your tag names them |
 | **Album-centric matching** | Scores MusicBrainz candidates; keeps your album tag when the online match is weak |
-| **Unicode-safe merge keys** | Persian/Arabic/CJK album folders no longer collapse into one bucket |
+| **Unicode-safe merge keys** | Persian/Arabic/CJK artist and album folders no longer collapse into one bucket |
 | **Rich metadata written to tags** | Saves enriched metadata back to each file in its native format |
 | **GUI frontend** | Tkinter UI with a single cool-gray "slate" theme, Scan / Organize workflow, Pause/Resume/Stop |
 | **CLI frontend** | Rich-powered terminal UI with interactive mode and full argument support |
@@ -44,7 +45,7 @@ Automatically organize your music library by enriching metadata from online sour
 | **Pause/Resume/Stop** | Control batch operations — rare in open-source tools |
 | **Multi-format write** | Writes tags to FLAC, OGG, M4A, WAV, AIFF (many tools only read) |
 | **Auto-organize** | Sorts into `Artist/Year - Album/Track - Title` structure automatically |
-| **Duplicate merge** | Detects and consolidates split album folders |
+| **Duplicate merge** | Detects and consolidates split artist and album folders |
 | **No install required** | Single Python script, or build to EXE with `build.bat` |
 
 ---
@@ -142,7 +143,7 @@ python music_organizer_cli.py "D:/Music" "D:/Organized" \
 | `--replace-art` | Replace existing embedded album art |
 | `--overwrite` | Overwrite existing output files |
 | `--preview` | Dry-run — show changes without applying them |
-| `--no-merge` | Skip merging duplicate album folders |
+| `--no-merge` | Skip merging duplicate artist and album folders |
 | `--verbose` / `-v` | Show detailed per-file processing log |
 | `--install-deps` | Install required Python packages |
 
@@ -150,10 +151,12 @@ python music_organizer_cli.py "D:/Music" "D:/Organized" \
 
 ## Build & releases
 
-Ready-to-run builds for **Windows** (`.exe`) and **macOS** (`.app` binary) are
+Ready-to-run builds for **Windows** (`.exe`) and **macOS** (binary) are
 published as release assets — grab the one for your platform from the
 [Releases page](https://github.com/alisadeghiaghili/music-organizer/releases).
-The `fpcalc` fingerprinting binary is bundled into each build (and can still be
+Each release ships the per-platform zip (GUI + CLI) **and** the standalone,
+unzipped GUI binary so you can run the GUI directly without extracting. The
+`fpcalc` fingerprinting binary is bundled into each build (and can still be
 re-downloaded on demand by the app).
 
 ### Build a Windows EXE locally
