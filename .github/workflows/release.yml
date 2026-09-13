@@ -1,0 +1,122 @@
+name: Release builds
+
+# Build the standalone GUI + CLI for Windows and macOS, then attach the
+# zipped artifacts to the (already-published) GitHub Release. The fpcalc
+# fingerprinting binary is downloaded from its live GitHub release assets and
+# embedded into each build, so users get audio fingerprinting out of the box.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install mutagen rich pyinstaller
+
+      - name: Download fpcalc.exe
+        shell: pwsh
+        run: |
+          $ver = (python -c "import fpcalc_installer as f; print(f.FPCALC_VERSION)").Trim()
+          $url = "https://github.com/acoustid/chromaprint/releases/download/v${ver}/chromaprint-fpcalc-${ver}-windows-x86_64.zip"
+          Invoke-WebRequest -Uri $url -OutFile fpcalc.zip
+          Expand-Archive fpcalc.zip -DestinationPath fpcalc-extract
+          $bin = Get-ChildItem -Path fpcalc-extract -Recurse -Filter fpcalc.exe | Select-Object -First 1
+          Move-Item $bin.FullName .\fpcalc.exe -Force
+          Write-Host "fpcalc v$ver downloaded."
+
+      - name: Build GUI
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name "MusicOrganizer-GUI" `
+            --add-binary "fpcalc.exe;." `
+            --hidden-import music_core --hidden-import fpcalc_installer --hidden-import config `
+            --collect-all mutagen --collect-all rich `
+            music_organizer_gui.py
+
+      - name: Build CLI
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --console `
+            --name "MusicOrganizer-CLI" `
+            --add-binary "fpcalc.exe;." `
+            --hidden-import music_core --hidden-import fpcalc_installer --hidden-import config `
+            --collect-all mutagen --collect-all rich `
+            music_organizer_cli.py
+
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive -Path dist\*.exe -DestinationPath MusicOrganizer-Windows.zip
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MusicOrganizer-Windows.zip
+
+  macos:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install mutagen rich pyinstaller
+
+      - name: Download fpcalc
+        run: |
+          set -euo pipefail
+          ver=$(python -c "import fpcalc_installer as f; print(f.FPCALC_VERSION)")
+          url="https://github.com/acoustid/chromaprint/releases/download/v${ver}/chromaprint-fpcalc-${ver}-macos-arm64.tar.gz"
+          curl -L "$url" -o fpcalc.tgz
+          tar -xzf fpcalc.tgz
+          bin=$(find . -type f -name fpcalc | head -1)
+          chmod +x "$bin"
+          cp "$bin" ./fpcalc
+          echo "fpcalc v${ver} downloaded."
+
+      - name: Build GUI
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed \
+            --name "MusicOrganizer-GUI" \
+            --add-binary "fpcalc:." \
+            --hidden-import music_core --hidden-import fpcalc_installer --hidden-import config \
+            --collect-all mutagen --collect-all rich \
+            music_organizer_gui.py
+
+      - name: Build CLI
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed \
+            --name "MusicOrganizer-CLI" \
+            --add-binary "fpcalc:." \
+            --hidden-import music_core --hidden-import fpcalc_installer --hidden-import config \
+            --collect-all mutagen --collect-all rich \
+            music_organizer_cli.py
+
+      - name: Package
+        run: zip -j MusicOrganizer-macOS.zip dist/MusicOrganizer-GUI dist/MusicOrganizer-CLI
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MusicOrganizer-macOS.zip
