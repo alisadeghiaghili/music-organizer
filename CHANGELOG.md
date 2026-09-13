@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.4.1] — 2026-09-13
+
+### Fixed
+
+- **fpcalc auto-download** — the in-app "Enable fingerprinting" download pointed at the dead `acoustid.org/files/chromaprint/...` path (HTTP 404), so enabling audio fingerprinting always failed partway through the download. URLs now come from the live GitHub release assets.
+- **fpcalc version** — bumped the downloaded binary to `1.6.1`; `fpcalc_installer.FPCALC_VERSION` is the single source of truth and the documented `config.fpcalc_urls` mirror was updated to match (and the non-existent `windows-arm64` / `linux-armv7hf` entries removed).
+
+### Added
+
+- **`tests/test_fpcalc_installer.py`** — offline regression tests that pin the fpcalc download URL shape and fail if a URL regresses to the dead `acoustid.org/files` host.
+
+---
+
 ## [2.4.0] — 2026-07-24
 
 ### Fixed
