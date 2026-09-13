@@ -1437,6 +1437,8 @@ def process_file(path, dst, opts, stats, log_cb=None):
         else:
             log("  ⚠ Album art not found in Cover Art Archive")
 
+    # Expose to callers (GUI) whether album art was found, for the status column.
+    meta["_art_found"] = cover_bytes is not None
     dest = destination(dst, meta)
 
     # 6. DRY RUN — stop before any filesystem mutation

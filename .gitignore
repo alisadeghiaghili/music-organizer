@@ -9,6 +9,10 @@ dist/
 build/
 *.spec
 
+# fpcalc binary (downloaded at build time, never committed)
+fpcalc
+fpcalc.exe
+
 # Python packaging
 *.egg-info/
 

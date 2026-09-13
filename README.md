@@ -20,7 +20,7 @@ Automatically organize your music library by enriching metadata from online sour
 | **Album-centric matching** | Scores MusicBrainz candidates; keeps your album tag when the online match is weak |
 | **Unicode-safe merge keys** | Persian/Arabic/CJK album folders no longer collapse into one bucket |
 | **Rich metadata written to tags** | Saves enriched metadata back to each file in its native format |
-| **GUI frontend** | Tkinter-based dark UI with Scan / Organize workflow, Pause/Resume/Stop |
+| **GUI frontend** | Tkinter UI with a single cool-gray "slate" theme, Scan / Organize workflow, Pause/Resume/Stop |
 | **CLI frontend** | Rich-powered terminal UI with interactive mode and full argument support |
 | **Copy or Move mode** | Keep your originals or move files; overwrite or skip duplicates |
 | **Dry-run / Preview** | Network lookups only — zero filesystem writes (tags, copies, merge, journal) |
@@ -144,19 +144,53 @@ python music_organizer_cli.py "D:/Music" "D:/Organized" \
 
 ---
 
-## Build Windows EXE
+## Build & releases
+
+Ready-to-run builds for **Windows** (`.exe`) and **macOS** (`.app` binary) are
+published as release assets — grab the one for your platform from the
+[Releases page](https://github.com/alisadeghiaghili/music-organizer/releases).
+The `fpcalc` fingerprinting binary is bundled into each build (and can still be
+re-downloaded on demand by the app).
+
+### Build a Windows EXE locally
 
 ```bat
 build.bat
 ```
 
-Produces:
+Requires `fpcalc.exe` next to `build.bat` (see the note in the script). Produces:
 
 ```
 dist\
 ├── MusicOrganizer-GUI.exe   ← double-click, no Python needed
 └── MusicOrganizer-CLI.exe   ← run from terminal
 ```
+
+### Build a macOS `.app` locally
+
+The release workflow builds an **arm64 + x86_64 universal** binary with PyInstaller
+on `macos-latest`. To reproduce it locally (Intel or Apple Silicon):
+
+```bash
+pip install mutagen rich pyinstaller
+# Download the fpcalc binary next to the entry scripts so it can be embedded.
+FPCALC_URL=$(python -c "import fpcalc_installer as f; print(f.get_download_url())")
+curl -L "$FPCALC_URL" -o /tmp/fpcalc.tgz
+tar -xzf /tmp/fpcalc.tgz -C /tmp
+FPCALC_BIN=$(find /tmp -type f -name fpcalc | head -1)
+chmod +x "$FPCALC_BIN"
+
+pyinstaller --noconfirm --clean --windowed --onefile \
+    --add-binary "$FPCALC_BIN:." music_organizer_gui.py
+pyinstaller --noconfirm --clean --windowed --onefile \
+    --add-binary "$FPCALC_BIN:." music_organizer_cli.py
+# dist/MusicOrganizer-GUI and dist/MusicOrganizer-CLI are the app binaries
+```
+
+PyInstaller's Windows target produces `.exe`; on macOS it produces the app
+binaries shown above. The release workflow automates this, building on
+`macos-latest` — the artifact runs natively on Apple Silicon and, via
+Rosetta 2, on Intel Macs.
 
 ---
 
