@@ -4,6 +4,45 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.4.2] — 2026-09-13
+
+### Changed
+
+- **Single "slate" theme** — the GUI dropped light/dark theme switching for one
+  hand-picked cool-gray palette. Theme-switching caused a Tk background-repaint
+  glitch on some scaled displays; with a single theme every widget is built once
+  and never recoloured at runtime, so the glitch can't occur.
+- **Card alignment** — the folder, option, and log panels now share common
+  left/right edges, and the two option cards sit in a regular 12px gutter.
+- **Slim, flat scrollbars** — custom `Slim` ttk scrollbar style removes the
+  default arrow buttons and 3-D look (table + log); the log's legacy
+  `ScrolledText` 3-D bar was replaced with a `tk.Text` + flat `ttk.Scrollbar`.
+
+### Added
+
+- **Native horizontal table scrolling** — the cluttering bottom scrollbar is
+  gone; wide columns scroll via mouse wheel over the table, Shift+wheel,
+  touchpad pan, or ←/→.
+- **Rotating empty-state** — the idle results table shows a rotating stage-side
+  one-liner that clears as soon as rows appear.
+- **Art-found status** — the table's "Art" column now reflects whether album art
+  was actually found during organize (not just whether it was attempted).
+- **Cross-platform release builds** — a GitHub Actions workflow builds the
+  standalone GUI + CLI for Windows (`.exe`) and macOS and attaches them to each
+  release; `fpcalc` is embedded so fingerprinting works out of the box.
+- **Tests** — `test_gui_theme.py` (palette shape), `test_gui_log.py` (log colour
+  mapping), `test_gui_sort.py` (header sort), and `test_entry_points.py`
+  (installed scripts resolve).
+
+### Fixed
+
+- **Stuck hover highlight** — a `<Leave>` event dropped while a modal folder
+  picker is open could leave a button stuck in its hover/press colour; hover
+  state is now re-derived from the real pointer position on motion and on
+  window focus return.
+
+---
+
 ## [2.4.1] — 2026-09-13
 
 ### Fixed
