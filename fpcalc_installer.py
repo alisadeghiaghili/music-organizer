@@ -5,13 +5,20 @@ import os, sys, platform, zipfile, tarfile, tempfile, shutil, threading, hashlib
 import urllib.request
 from pathlib import Path
 
+# fpcalc is published as a GitHub release asset. The old acoustid.org/files
+# path is dead (404) and broke the in-app "Enable fingerprinting" download, so
+# all URLs are built from one verified base. Keep FPCALC_VERSION in sync with
+# the hash table below when bumping.
+FPCALC_VERSION = "1.6.1"
+_FPCALC_BASE = f"https://github.com/acoustid/chromaprint/releases/download/v{FPCALC_VERSION}"
+
 FPCALC_URLS = {
-    ("Windows", "AMD64"):  "https://acoustid.org/files/chromaprint/chromaprint-fpcalc-1.6.0-windows-x86_64.zip",
-    ("Windows", "x86"):    "https://acoustid.org/files/chromaprint/chromaprint-fpcalc-1.6.0-windows-x86_64.zip",
-    ("Darwin",  "arm64"):  "https://acoustid.org/files/chromaprint/chromaprint-fpcalc-1.6.0-macos-arm64.tar.gz",
-    ("Darwin",  "x86_64"): "https://acoustid.org/files/chromaprint/chromaprint-fpcalc-1.6.0-macos-x86_64.tar.gz",
-    ("Linux",   "aarch64"):"https://acoustid.org/files/chromaprint/chromaprint-fpcalc-1.6.0-linux-arm64.tar.gz",
-    ("Linux",   "x86_64"): "https://acoustid.org/files/chromaprint/chromaprint-fpcalc-1.6.0-linux-x86_64.tar.gz",
+    ("Windows", "AMD64"):  f"{_FPCALC_BASE}/chromaprint-fpcalc-{FPCALC_VERSION}-windows-x86_64.zip",
+    ("Windows", "x86"):    f"{_FPCALC_BASE}/chromaprint-fpcalc-{FPCALC_VERSION}-windows-x86_64.zip",
+    ("Darwin",  "arm64"):  f"{_FPCALC_BASE}/chromaprint-fpcalc-{FPCALC_VERSION}-macos-arm64.tar.gz",
+    ("Darwin",  "x86_64"): f"{_FPCALC_BASE}/chromaprint-fpcalc-{FPCALC_VERSION}-macos-x86_64.tar.gz",
+    ("Linux",   "aarch64"):f"{_FPCALC_BASE}/chromaprint-fpcalc-{FPCALC_VERSION}-linux-arm64.tar.gz",
+    ("Linux",   "x86_64"): f"{_FPCALC_BASE}/chromaprint-fpcalc-{FPCALC_VERSION}-linux-x86_64.tar.gz",
 }
 
 # Known good SHA-256 hashes for fpcalc binaries (v1.6.0)

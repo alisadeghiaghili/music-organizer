@@ -49,16 +49,15 @@ DEFAULTS = {
     "config_dir": str(Path.home() / ".music-organizer"),
     "fpcalc_filename": "fpcalc.exe" if os.name == "nt" else "fpcalc",
 
-    # Chromaprint
-    "fpcalc_version": "1.6.0",
+    # Chromaprint — mirror of fpcalc_installer.FPCALC_URLS (kept for the
+    # documented config surface; the installer is the source of truth).
+    "fpcalc_version": "1.6.1",
     "fpcalc_urls": {
-        "windows-amd64": "https://github.com/acoustid/chromaprint/releases/download/v1.6.0/chromaprint-fpcalc-1.6.0-windows-x86_64.zip",
-        "windows-arm64": "https://github.com/acoustid/chromaprint/releases/download/v1.6.0/chromaprint-fpcalc-1.6.0-windows-arm64.zip",
-        "macos-x86_64": "https://github.com/acoustid/chromaprint/releases/download/v1.6.0/chromaprint-fpcalc-1.6.0-macos-x86_64.tar.gz",
-        "macos-arm64": "https://github.com/acoustid/chromaprint/releases/download/v1.6.0/chromaprint-fpcalc-1.6.0-macos-arm64.tar.gz",
-        "linux-x86_64": "https://github.com/acoustid/chromaprint/releases/download/v1.6.0/chromaprint-fpcalc-1.6.0-linux-x86_64.tar.gz",
-        "linux-arm64": "https://github.com/acoustid/chromaprint/releases/download/v1.6.0/chromaprint-fpcalc-1.6.0-linux-aarch64.tar.gz",
-        "linux-armhf": "https://github.com/acoustid/chromaprint/releases/download/v1.6.0/chromaprint-fpcalc-1.6.0-linux-armv7hf.tar.gz",
+        "windows-amd64": "https://github.com/acoustid/chromaprint/releases/download/v1.6.1/chromaprint-fpcalc-1.6.1-windows-x86_64.zip",
+        "macos-x86_64": "https://github.com/acoustid/chromaprint/releases/download/v1.6.1/chromaprint-fpcalc-1.6.1-macos-x86_64.tar.gz",
+        "macos-arm64": "https://github.com/acoustid/chromaprint/releases/download/v1.6.1/chromaprint-fpcalc-1.6.1-macos-arm64.tar.gz",
+        "linux-x86_64": "https://github.com/acoustid/chromaprint/releases/download/v1.6.1/chromaprint-fpcalc-1.6.1-linux-x86_64.tar.gz",
+        "linux-arm64": "https://github.com/acoustid/chromaprint/releases/download/v1.6.1/chromaprint-fpcalc-1.6.1-linux-arm64.tar.gz",
     },
 
     # Merge settings

@@ -9,6 +9,9 @@ dist/
 build/
 *.spec
 
+# Python packaging
+*.egg-info/
+
 # IDE
 .vscode/
 .idea/
