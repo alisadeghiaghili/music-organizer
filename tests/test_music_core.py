@@ -190,6 +190,25 @@ class TestReadTags:
         assert tags["total_tracks"] == "10"
         assert "Rock" in tags["genres"]
 
+    def test_read_tags_strips_track_prefix_from_title(self, tmp_dir):
+        """A leading 'NN -' in the title tag must be stripped at read time, so
+        the scan view (and MB queries) never show the redundant prefix."""
+        from mutagen.id3 import ID3, TIT2, TPE1, TALB, TRCK
+        path = str(Path(tmp_dir) / "03 - Song.mp3")
+        tags = ID3()
+        tags.add(TIT2(encoding=3, text=["03 - Song"]))
+        tags.add(TPE1(encoding=3, text=["Artist"]))
+        tags.add(TALB(encoding=3, text=["Album"]))
+        tags.add(TRCK(encoding=3, text=["3/10"]))
+        tags.save(path)
+        frame = bytes([0xFF, 0xFB, 0x90, 0x00]) + b"\x00" * 413
+        with open(path, "ab") as f:
+            f.write(frame * 3)
+
+        got = read_tags(path)
+        assert got["title"] == "Song"
+        assert got["track"] == "3"
+
     def test_read_nonexistent_file(self):
         tags = read_tags("/nonexistent/file.mp3")
         assert tags["title"] == ""

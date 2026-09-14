@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.4.4] — 2026-09-14
+
+### Fixed
+
+- **Leading `NN -` prefix stripped at tag-read time** — 2.4.3 only cleaned the
+  title in the Organize path, so the **Scan** view (and the CLI preview) still
+  showed a redundant `01 -` prefix in the Title column next to the real track
+  number. The strip now happens in `read_tags`, the single choke point every
+  frontend reads through, so the Scan view, Organize view, CLI preview, and
+  MusicBrainz queries all see a clean title and the Title / Trk columns are
+  consistent.
+
+---
+
 ## [2.4.3] — 2026-09-13
 
 ### Fixed

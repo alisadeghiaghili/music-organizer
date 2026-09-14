@@ -632,6 +632,21 @@ def _has_artwork(tags):
     return False
 
 
+def _clean_meta(meta):
+    """Normalize a freshly-read tag dict before it is shown or queried.
+
+    A ripped filename stem (or a messy title tag) can carry a leading
+    ``"NN -"`` track prefix. The real album position is the TRACK tag, so that
+    prefix is redundant and, if left in, it double-counts in the
+    ``"NN - Title"`` output filename and clutters the Title column. Strip it at
+    the single read choke point so the scan view, organize view, CLI preview,
+    and MusicBrainz queries all see the clean title.
+    """
+    if meta.get("title"):
+        meta["title"] = strip_track_prefix(meta["title"])
+    return meta
+
+
 def read_tags(path):
     """Read metadata tags from an audio file (any supported format)."""
     empty = {
@@ -643,23 +658,23 @@ def read_tags(path):
     ext = Path(path).suffix.lower()
 
     if ext == ".mp3":
-        return _read_id3_tags(path, empty)
+        return _clean_meta(_read_id3_tags(path, empty))
     elif ext in (".flac",):
-        return _read_flac_tags(path, empty)
+        return _clean_meta(_read_flac_tags(path, empty))
     elif ext in (".ogg", ".oga"):
-        return _read_vorbis_tags(path, empty)
+        return _clean_meta(_read_vorbis_tags(path, empty))
     elif ext in (".m4a", ".mp4"):
-        return _read_mp4_tags(path, empty)
+        return _clean_meta(_read_mp4_tags(path, empty))
     elif ext in (".wav",):
-        return _read_wave_tags(path, empty)
+        return _clean_meta(_read_wave_tags(path, empty))
     elif ext in (".aiff", ".aif"):
-        return _read_aiff_tags(path, empty)
+        return _clean_meta(_read_aiff_tags(path, empty))
 
     try:
         audio = MutagenFile(path)
         if audio is None:
             return empty
-        return _read_generic_tags(audio, empty)
+        return _clean_meta(_read_generic_tags(audio, empty))
     except Exception:
         return empty
 
