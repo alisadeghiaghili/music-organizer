@@ -63,6 +63,9 @@ DEFAULTS = {
     # Merge settings
     "merge_similar_albums": True,
 
+    # UI
+    "theme": "system",   # light | dark | system (webview GUI)
+
     # MusicBrainz API endpoints
     "mb_base_url": "https://musicbrainz.org/ws/2",
     "caa_base_url": "https://coverartarchive.org",

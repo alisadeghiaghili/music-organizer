@@ -26,7 +26,10 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install mutagen rich pyinstaller
+          # GUI is now the pywebview (WebView2) frontend: needs pywebview + the
+          # .NET bridge (pythonnet). mutagen/rich stay for the CLI and the
+          # shared engine.
+          pip install mutagen rich pyinstaller pywebview pythonnet
 
       - name: Download fpcalc.exe
         shell: pwsh
@@ -42,12 +45,21 @@ jobs:
       - name: Build GUI
         shell: pwsh
         run: |
+          # pywebview ships a PyInstaller hook that bundles the WebView2 runtime
+          # (webview/lib) and pythonnet ships one for clr — so we only need the
+          # platform modules + the icon. (Do NOT --collect-all webview: it forces
+          # an import of the WinForms platform, which calls clr.AddReference at
+          # analysis time and aborts the build.)
           pyinstaller --noconfirm --clean --onefile --windowed `
             --name "MusicOrganizer-GUI" `
+            --icon "app.ico" `
             --add-binary "fpcalc.exe;." `
+            --add-data "icon.png;." `
+            --add-data "app.ico;." `
             --hidden-import music_core --hidden-import fpcalc_installer --hidden-import config `
-            --collect-all mutagen --collect-all rich `
-            music_organizer_gui.py
+            --hidden-import webview.platforms.winforms --hidden-import pythonnet `
+            --collect-all mutagen `
+            music_organizer_web.py
 
       - name: Build CLI
         shell: pwsh
@@ -83,7 +95,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install mutagen rich pyinstaller
+          # GUI is now the pywebview (WKWebView) frontend: on macOS pywebview
+          # pulls the PyObjC Cocoa/WebKit frameworks it needs.
+          pip install mutagen rich pyinstaller pywebview
 
       - name: Download fpcalc
         run: |
@@ -99,12 +113,18 @@ jobs:
 
       - name: Build GUI
         run: |
+          # pywebview ships a PyInstaller hook that bundles its js assets. The
+          # cocoa (WKWebView) platform pulls PyObjC frameworks at import time, so
+          # force it explicitly; the bundled hook handles the rest.
           pyinstaller --noconfirm --clean --onefile --windowed \
             --name "MusicOrganizer-GUI" \
+            --icon "app.icns" \
             --add-binary "fpcalc:." \
+            --add-data "icon.png:." \
             --hidden-import music_core --hidden-import fpcalc_installer --hidden-import config \
-            --collect-all mutagen --collect-all rich \
-            music_organizer_gui.py
+            --hidden-import webview.platforms.cocoa \
+            --collect-all mutagen \
+            music_organizer_web.py
 
       - name: Build CLI
         run: |

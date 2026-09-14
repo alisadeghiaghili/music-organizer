@@ -43,32 +43,33 @@ echo  [2/6] Upgrading pip...
 python -m pip install --upgrade pip -q
 
 echo  [3/6] Installing dependencies...
-python -m pip install mutagen rich pyinstaller -q
+:: GUI is now the pywebview (WebView2) frontend, so it also needs pywebview +
+:: pythonnet (the .NET bridge). CLI still only needs mutagen + rich.
+python -m pip install mutagen rich pyinstaller pywebview pythonnet -q
 if errorlevel 1 ( echo  [ERROR] Dependency install failed. & pause & exit /b 1 )
 
-echo  [4/6] Building GUI (MusicOrganizer-GUI.exe)...
+echo  [4/6] Building GUI (MusicOrganizer-GUI.exe, pywebview)...
+:: The bundled pywebview + pythonnet PyInstaller hooks bundle the WebView2
+:: runtime and clr automatically; we only add the platform module + icon.
+:: Do NOT --collect-all webview (it imports the WinForms platform, which calls
+:: clr.AddReference at analysis time and aborts the build).
+if not exist "app.ico" (
+    echo  [ERROR] app.ico not found (required for the GUI icon).
+    pause & exit /b 1
+)
 pyinstaller --noconfirm --clean --onefile --windowed ^
     --name "MusicOrganizer-GUI" ^
-    --add-data "music_core.py;." ^
-    --add-data "fpcalc_installer.py;." ^
+    --icon "app.ico" ^
     --add-binary "fpcalc.exe;." ^
+    --add-data "icon.png;." ^
+    --add-data "app.ico;." ^
     --hidden-import "music_core" ^
     --hidden-import "fpcalc_installer" ^
-    --hidden-import "mutagen" ^
-    --hidden-import "mutagen.id3" ^
-    --hidden-import "mutagen.mp3" ^
-    --hidden-import "mutagen.flac" ^
-    --hidden-import "mutagen.mp4" ^
-    --hidden-import "mutagen.ogg" ^
-    --hidden-import "rich" ^
-    --hidden-import "rich.console" ^
-    --hidden-import "rich.progress" ^
-    --hidden-import "rich.table" ^
-    --hidden-import "rich.panel" ^
-    --hidden-import "rich.prompt" ^
+    --hidden-import "config" ^
+    --hidden-import "webview.platforms.winforms" ^
+    --hidden-import "pythonnet" ^
     --collect-all "mutagen" ^
-    --collect-all "rich" ^
-    music_organizer_gui.py
+    music_organizer_web.py
 if errorlevel 1 ( echo  [ERROR] GUI build failed. & pause & exit /b 1 )
 
 echo.

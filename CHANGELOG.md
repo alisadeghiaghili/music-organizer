@@ -4,6 +4,33 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.5.0] — 2026-09-14
+
+### Added
+
+- **New webview GUI (primary frontend)** — a modern pywebview (WebView2 on
+  Windows, WKWebView on macOS) frontend replacing the Tkinter GUI as the app
+  that ships in releases. Same `music_core` engine and Scan / Organize workflow,
+  but a crisp web-based UI. The Tkinter frontend (`music_organizer_gui.py`)
+  remains as a lightweight, dependency-free fallback.
+- **Light / dark / system theming** — the webview GUI has a Light / Dark /
+  System theme switcher in the header; the choice is remembered in
+  `~/.music-organizer/config.json` (`theme`) and the window background is
+  pre-tinted to the resolved theme so there's no flash on launch.
+- **App icon everywhere** — a new vinyl-on-slate app icon (`icon.png` /
+  `app.ico` / `app.icns`) is embedded in the released binaries, shown in the OS
+  window titlebar, and drawn in the in-page header next to the app name.
+
+### Changed
+
+- **Release builds now package the webview GUI** — the Windows and macOS
+  release workflows build `music_organizer_web.py` (PyInstaller) with the
+  pywebview + pythonnet/PyObjC runtime bundled, so the shipped
+  `MusicOrganizer-GUI` is the webview app. `fpcalc` is still embedded, and the
+  CLI build is unchanged.
+
+---
+
 ## [2.4.4] — 2026-09-14
 
 ### Fixed
