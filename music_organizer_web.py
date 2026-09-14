@@ -364,7 +364,7 @@ HTML = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Music Organizer — webview</title>
+<title>Music Organizer</title>
 <style>
   :root{
     --bg:#e8e9ec; --surface:#fbfbfc; --surface2:#e0e2e7;
@@ -581,7 +581,7 @@ function mark(cls){ return `<span class="mark ${cls}">${"·"}</span>`; }
 
 function render(s){
   applyTheme(s);
-  $("ver").textContent = "v" + s.version + "  ·  pywebview";
+  $("ver").textContent = "v" + s.version;
   // fpcalc pill
   const fp = $("fp");
   if(s.fpcalc === "ok"){ fp.textContent="fingerprinting ✓"; fp.className="pill ok"; fp.onclick=null; }

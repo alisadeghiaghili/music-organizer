@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.6.0] — 2026-09-14
+
+### Added
+
+- **Linux release builds** — the release workflow now also builds the webview
+  GUI + CLI for Linux (`MusicOrganizer-Linux.tar.gz`), bringing the app to all
+  three major desktop platforms. On Linux the GUI uses GTK3 + WebKit2GTK
+  (pywebview's `[gtk]` backend).
+
+### Changed
+
+- **Cleaner header** — the in-page header shows only the version, without the
+  framework name.
+
+---
+
 ## [2.5.0] — 2026-09-14
 
 ### Added
