@@ -1207,6 +1207,67 @@ def destination(root, meta):
     fname  = f"{track} - {title}{ext}" if track else f"{title}{ext}"
     return Path(root) / artist / folder / fname
 
+
+def _hash_file(path):
+    """SHA-1 of a file's bytes (read in 1 MiB chunks); None if unreadable."""
+    h = hashlib.sha1()
+    try:
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+    except OSError:
+        return None
+    return h.hexdigest()
+
+
+def _same_file(a, b):
+    """True when two paths hold identical bytes (size + SHA-1)."""
+    try:
+        sa = Path(a).stat().st_size
+        sb = Path(b).stat().st_size
+        if sa != sb:
+            return False
+        if sa == 0:
+            return True
+        ha, hb = _hash_file(a), _hash_file(b)
+        return ha is not None and ha == hb
+    except OSError:
+        return False
+
+
+def _resolve_collision(dest, src):
+    """Choose a writable destination for ``src`` without ever discarding data.
+
+    Returns a ``(path, is_duplicate)`` tuple:
+      * ``dest`` is missing            → ``(dest, False)`` (fresh write).
+      * ``dest`` already holds the same bytes as ``src`` → ``(dest, True)``
+        (a true duplicate — safe for the caller to skip).
+      * ``dest`` holds *different* bytes → allocate ``Name (N).ext`` for the
+        first free slot, so a genuinely distinct file is preserved instead of
+        being dropped as a false "duplicate".
+
+    Two distinct tracks can collapse onto one destination path when metadata
+    normalisation (track-number cleaning, title prefix stripping, or an
+    aggressive online match) erases the only thing that told them apart. The
+    old behaviour then skipped the second file as "exists" and the song was
+    silently lost. This helper guarantees a colliding *different* file always
+    lands somewhere.
+    """
+    dest = Path(dest)
+    if not dest.exists():
+        return dest, False
+    if _same_file(dest, src):
+        return dest, True
+    stem, suffix = dest.stem, dest.suffix
+    for n in range(1, 100000):
+        cand = dest.with_name(f"{stem} ({n}){suffix}")
+        if not cand.exists():
+            return cand, False
+        if _same_file(cand, src):
+            return cand, True
+    # Practically unreachable; refuse to drop data even if every slot is taken.
+    return dest.with_name(f"{stem} (conflict){suffix}"), False
+
 def collect_audio_files(folder):
     """Collect all supported audio files from a folder (recursively).
     Does not follow symlinks to prevent infinite loops."""
@@ -1572,11 +1633,20 @@ def process_file(path, dst, opts, stats, log_cb=None):
     # 7. Copy / move first (source stays immutable in copy mode)
     dest.parent.mkdir(parents=True, exist_ok=True)
     status = "ok"
-    if dest.exists() and not opts.get("overwrite", False):
-        status = "skipped"; stats["skipped"] += 1
-        log(f"  ↷ Skipped (exists): {dest.name}")
-        jour("skip", src=path, dest=dest)
-        return meta, source, status, str(dest)
+
+    if not opts.get("overwrite", False):
+        # Never drop a file just because the destination name is taken. A true
+        # duplicate (same bytes) is skipped; a DIFFERENT file that collapsed
+        # onto the same name gets its own "(N)" filename instead of being lost.
+        intended = dest
+        dest, is_dup = _resolve_collision(dest, path)
+        if is_dup:
+            status = "skipped"; stats["skipped"] += 1
+            log(f"  ↷ Skipped (duplicate): {dest.name}")
+            jour("skip", src=path, dest=dest)
+            return meta, source, status, str(dest)
+        if dest != intended:
+            log(f"  ↷ '{intended.name}' already holds a different file — keeping both as '{dest.name}'")
 
     try:
         (shutil.copy2 if opts.get("copy", True) else shutil.move)(path, dest)
