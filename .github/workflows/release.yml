@@ -136,14 +136,18 @@ jobs:
             music_organizer_cli.py
 
       - name: Package
-        run: zip -j MusicOrganizer-macOS.zip dist/MusicOrganizer-GUI dist/MusicOrganizer-CLI
+        run: |
+          zip -j MusicOrganizer-macOS.zip dist/MusicOrganizer-GUI dist/MusicOrganizer-CLI
+          # Platform-qualified name for the standalone so it doesn't collide with
+          # the Linux standalone (both are extensionless "MusicOrganizer-GUI").
+          cp dist/MusicOrganizer-GUI dist/MusicOrganizer-GUI-macos
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             MusicOrganizer-macOS.zip
-            dist/MusicOrganizer-GUI
+            dist/MusicOrganizer-GUI-macos
 
   linux:
     runs-on: ubuntu-latest
@@ -217,11 +221,14 @@ jobs:
             music_organizer_cli.py
 
       - name: Package
-        run: tar -czf MusicOrganizer-Linux.tar.gz -C dist MusicOrganizer-GUI MusicOrganizer-CLI
+        run: |
+          tar -czf MusicOrganizer-Linux.tar.gz -C dist MusicOrganizer-GUI MusicOrganizer-CLI
+          # Platform-qualified name for the standalone (see the macOS job).
+          cp dist/MusicOrganizer-GUI dist/MusicOrganizer-GUI-linux
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             MusicOrganizer-Linux.tar.gz
-            dist/MusicOrganizer-GUI
+            dist/MusicOrganizer-GUI-linux
