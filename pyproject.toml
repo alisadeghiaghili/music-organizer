@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "music-organizer"
-version = "2.4.4"
+version = "2.5.0"
 description = "Automatically organize your music library with online metadata and audio fingerprinting"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -23,9 +23,14 @@ dev = [
 [project.scripts]
 music-organizer = "music_organizer_cli:main"
 music-organizer-gui = "music_organizer_gui:main"
+# NOTE: the webview frontend is intentionally NOT a console script. It imports
+# `webview` at module top, which is a Windows/macOS runtime dep not installed in
+# the (headless, cross-platform) test job; exposing it here would make
+# tests/test_entry_points.py import it in CI and fail. It ships as a module and
+# runs via `python -m music_organizer_web` (see README).
 
 [tool.setuptools]
-py-modules = ["music_core", "config", "matching", "fpcalc_installer", "music_organizer_cli", "music_organizer_gui"]
+py-modules = ["music_core", "config", "matching", "fpcalc_installer", "music_organizer_cli", "music_organizer_gui", "music_organizer_web"]
 
 [tool.setuptools.packages.find]
 include = ["music_organizer*"]

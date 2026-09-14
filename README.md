@@ -25,7 +25,7 @@ Automatically organize your music library by enriching metadata from online sour
 | **Album-centric matching** | Scores MusicBrainz candidates; keeps your album tag when the online match is weak |
 | **Unicode-safe merge keys** | Persian/Arabic/CJK artist and album folders no longer collapse into one bucket |
 | **Rich metadata written to tags** | Saves enriched metadata back to each file in its native format |
-| **GUI frontend** | Tkinter UI with a single cool-gray "slate" theme, Scan / Organize workflow, Pause/Resume/Stop |
+| **GUI frontend** | Webview (WebView2/WKWebView) UI with Light / Dark / System theming, Scan / Organize workflow, Pause/Resume/Stop |
 | **CLI frontend** | Rich-powered terminal UI with interactive mode and full argument support |
 | **Copy or Move mode** | Keep your originals or move files; overwrite or skip duplicates |
 | **Dry-run / Preview** | Network lookups only — zero filesystem writes (tags, copies, merge, journal) |
@@ -55,10 +55,14 @@ Automatically organize your music library by enriching metadata from online sour
 ```
 music-organizer/
 ├── music_core.py            ← shared logic (metadata, fingerprinting, art, tags, filesystem)
-├── music_organizer_gui.py   ← GUI frontend (Tkinter)
+├── music_organizer_web.py   ← GUI frontend (pywebview — WebView2/WKWebView, light/dark/system)
+├── music_organizer_gui.py   ← GUI fallback frontend (Tkinter, dependency-free)
 ├── music_organizer_cli.py   ← CLI frontend (Rich)
 ├── fpcalc_installer.py      ← fingerprinting tool auto-downloader
 ├── config.py                ← centralized configuration system
+├── icon.png                 ← app icon source (1024px)
+├── app.ico                  ← app icon (Windows, multi-size)
+├── app.icns                 ← app icon (macOS)
 ├── requirements.txt
 ├── pyproject.toml
 ├── build.bat                ← Windows build script
@@ -77,6 +81,18 @@ music-organizer/
 pip install -r requirements.txt
 ```
 
+To run the webview GUI from source (the primary frontend), also install its
+runtime (WebView2 on Windows, WKWebView on macOS):
+
+```bash
+# Windows
+pip install pywebview pythonnet
+# macOS
+pip install pywebview   # pulls the PyObjC Cocoa/WebKit frameworks
+```
+
+The Tkinter fallback GUI and the CLI run on just `requirements.txt`.
+
 ### Development
 
 ```bash
@@ -89,6 +105,16 @@ python -m pytest tests/ -v       # run tests
 ## Usage
 
 ### GUI
+
+The primary GUI is the webview frontend (see the note above for its extra
+deps). Switch between **Light / Dark / System** in the top-right; your choice
+is remembered.
+
+```bash
+python -m music_organizer_web
+```
+
+A dependency-free Tkinter fallback is also available:
 
 ```bash
 python music_organizer_gui.py
@@ -179,7 +205,7 @@ The release workflow builds an **arm64 + x86_64 universal** binary with PyInstal
 on `macos-latest`. To reproduce it locally (Intel or Apple Silicon):
 
 ```bash
-pip install mutagen rich pyinstaller
+pip install mutagen rich pyinstaller pywebview
 # Download the fpcalc binary next to the entry scripts so it can be embedded.
 FPCALC_URL=$(python -c "import fpcalc_installer as f; print(f.get_download_url())")
 curl -L "$FPCALC_URL" -o /tmp/fpcalc.tgz
@@ -188,7 +214,9 @@ FPCALC_BIN=$(find /tmp -type f -name fpcalc | head -1)
 chmod +x "$FPCALC_BIN"
 
 pyinstaller --noconfirm --clean --windowed --onefile \
-    --add-binary "$FPCALC_BIN:." music_organizer_gui.py
+    --icon app.icns --add-binary "$FPCALC_BIN:." --add-data "icon.png:." \
+    --hidden-import webview.platforms.cocoa --collect-all mutagen \
+    music_organizer_web.py
 pyinstaller --noconfirm --clean --windowed --onefile \
     --add-binary "$FPCALC_BIN:." music_organizer_cli.py
 # dist/MusicOrganizer-GUI and dist/MusicOrganizer-CLI are the app binaries
