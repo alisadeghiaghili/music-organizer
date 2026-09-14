@@ -31,6 +31,7 @@ from matching import (
     DEFAULT_ALBUM_MIN_SCORE,
     DEFAULT_RECORDING_MIN_SCORE,
     normalize_album_key as _normalize_album_key_unicode,
+    normalize_artist_key as _normalize_artist_key_unicode,
     pick_best_recording,
     select_best_release,
 )
@@ -1137,6 +1138,33 @@ def _write_mp4_tags(path, meta, cover_bytes=None):
 
 SAFE_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
+# A leading "NN -" / "NN." / "NN)" / "NN—" track-number prefix that rips and
+# taggers often bake into the TITLE tag or the filename stem. The real album
+# position comes from the TRACK tag, so the prefix is redundant and, left in,
+# it double-counts in the "NN - Title" output filename.
+_TRACK_PREFIX_RE = re.compile(
+    r"^\s*\d{1,3}\s*(?:[.\)–—-]\s*|\s+-\s+)", re.UNICODE
+)
+
+
+def strip_track_prefix(title):
+    """Drop a leading numeric track-number prefix from a title.
+
+    ``"01 - Song"`` → ``"Song"``. The match must be followed by a separator
+    ("-", "—", "–", ".", ")") so a title that merely starts with a number
+    (``"8 Mile"``) is left alone. Idempotent.
+    """
+    if not title:
+        return title
+    t = str(title)
+    while True:
+        stripped = _TRACK_PREFIX_RE.sub("", t, count=1)
+        if stripped == t:
+            break
+        t = stripped
+    return t.strip() or title
+
+
 def safe(name, maxlen=None):
     if maxlen is None:
         maxlen = _cfg["filename_max_length"]
@@ -1145,6 +1173,10 @@ def safe(name, maxlen=None):
 def normalize_album_key(folder_name):
     """Unicode-safe album folder key (see matching.normalize_album_key)."""
     return _normalize_album_key_unicode(folder_name)
+
+def normalize_artist_key(artist_name):
+    """Unicode-safe artist folder key (see matching.normalize_artist_key)."""
+    return _normalize_artist_key_unicode(artist_name)
 
 def folder_score(folder_name):
     return 1 if re.match(r'^\d{4}\s*-\s*', folder_name) else 0
@@ -1303,6 +1335,77 @@ def merge_duplicate_albums(output_root, log_cb=None, journal=True):
     return merged_count
 
 
+def merge_duplicate_artists(output_root, log_cb=None, journal=True):
+    """Merge artist folders that normalize to the same key.
+
+    A stray bracket, trailing space, or case difference in an artist name used
+    to leave the same artist split across two sibling folders (e.g.
+    ``"Shajarian"`` and ``"Shajarian (فرض)"``). This groups the top-level
+    artist folders by :func:`normalize_artist_key` and folds each duplicate
+    group into a single winner, reusing the album merge so album subfolders and
+    their sidecars move along with the files.
+
+    Runs *before* :func:`merge_duplicate_albums` so it works on the artist
+    folder directly, whatever its depth.
+
+    Winner choice: the alphabetically first name, preferring a non-bracketed
+    spelling — the result is a stable, readable canonical folder.
+
+    Args:
+        output_root: Library root containing ``Artist`` folders.
+        log_cb: Optional callable(str) for progress messages.
+        journal: When True, record each merge in ``organize-journal.jsonl``.
+
+    Returns:
+        Number of loser artist folders merged (removed).
+    """
+    def log(m):
+        if log_cb: log_cb(m)
+    output_root  = Path(output_root)
+    if not output_root.exists():
+        return 0
+    merged_count = 0
+    artist_dirs = sorted(d for d in output_root.iterdir() if d.is_dir())
+    groups = {}
+    for artist_dir in artist_dirs:
+        groups.setdefault(normalize_artist_key(artist_dir.name), []).append(artist_dir)
+    for key, dirs in groups.items():
+        if len(dirs) < 2:
+            continue
+        # Canonical winner: prefer a name with no bracket annotation, then one
+        # that is not ALL-CAPS (reads better than its uppercase twin), then
+        # alphabetically (case-insensitive). Deterministic and data-preserving.
+        def pick(d):
+            n = d.name
+            has_brackets = bool(re.search(r"[\(\)\[\]\{\}]", n))
+            all_caps = n.isupper() and any(c.isalpha() for c in n)
+            return (has_brackets, all_caps, n.casefold(), n)
+        dirs_sorted = sorted(dirs, key=pick)
+        winner, losers = dirs_sorted[0], dirs_sorted[1:]
+        log(f"  \U0001f500 Merging artist into: {winner.name}")
+        for loser in losers:
+            log(f"      ← absorbing: {loser.name}")
+            try:
+                _merge_tree(loser, winner, log)
+                leftover = [p.name for p in loser.rglob("*") if p.is_file()]
+                if leftover:
+                    log(f"      ! kept in place (name conflicts): {len(leftover)} file(s)")
+                    continue
+                shutil.rmtree(str(loser))
+                merged_count += 1
+                if journal:
+                    journal_append(
+                        output_root, "merge",
+                        src=str(loser), dst=str(winner),
+                        extra={"artist": loser.name, "kind": "artist", "key": key},
+                    )
+            except Exception as e:
+                log(f"      ! could not merge {loser.name}: {e}")
+    log(f"  ✅ Merged {merged_count} duplicate artist folder(s)"
+        if merged_count else "  ✅ No duplicate artist folders found")
+    return merged_count
+
+
 # ── Process one file ────────────────────────────────────────────────────────────────
 
 def _is_confident_match(mb_result, original_meta):
@@ -1413,6 +1516,10 @@ def process_file(path, dst, opts, stats, log_cb=None):
     if not meta.get("title"):  meta["title"]  = Path(path).stem
     if not meta.get("artist"): meta["artist"] = "Unknown Artist"
     if not meta.get("album"):  meta["album"]  = "Unknown Album"
+    # A ripped filename stem (or a messy title tag) can carry a "NN -" prefix.
+    # The real album position is the TRACK tag, so strip the redundant prefix —
+    # the output filename is always "TRACK - Title", never "NN - NN - Title".
+    meta["title"] = strip_track_prefix(meta["title"])
 
     # 4. Lyrics
     if opts.get("fetch_lyrics", True) and meta.get("artist") and meta.get("title"):

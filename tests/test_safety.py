@@ -20,6 +20,7 @@ from mutagen.id3 import ID3
 
 from music_core import (
     merge_duplicate_albums,
+    merge_duplicate_artists,
     process_file,
     read_tags,
 )
@@ -217,6 +218,93 @@ class TestMergeSidecars:
         # use identical layout; all moves skip; loser must survive.
         merge_duplicate_albums(str(root))
         assert loser.exists(), "rmtree removed a folder that still held skipped files"
+
+
+class TestMergeArtist:
+    """merge_duplicate_artists folds split artist folders into one."""
+
+    def _artist_album(self, root: Path, artist: str, album: str, song: str) -> Path:
+        album_dir = root / artist / album
+        album_dir.mkdir(parents=True)
+        (album_dir / f"01 - {song}.mp3").write_bytes(b"\x00" * 8)
+        (album_dir / "cover.jpg").write_bytes(b"\xff\xd8\xff")
+        return album_dir
+
+    def test_bracket_artist_variant_is_merged(self, tmp_dir):
+        root = Path(tmp_dir) / "out"
+        root.mkdir()
+        # Same artist, one folder has a stray bracket variant in its name.
+        self._artist_album(root, "Shajarian", "2001 - Divan", "Parvaneh")
+        loser = self._artist_album(root, "Shajarian (فرض)", "1999 - Other", "Khesht")
+
+        merged = merge_duplicate_artists(str(root))
+
+        assert merged == 1
+        assert not loser.exists()
+        winner = root / "Shajarian"
+        # Both album folders now live under the canonical artist folder.
+        assert (winner / "2001 - Divan" / "01 - Parvaneh.mp3").exists()
+        assert (winner / "1999 - Other" / "01 - Khesht.mp3").exists()
+        assert len([p for p in root.iterdir() if p.is_dir()]) == 1
+
+    def test_distinct_artists_not_merged(self, tmp_dir):
+        root = Path(tmp_dir) / "out"
+        root.mkdir()
+        self._artist_album(root, "Raha Derakhsh", "Raha", "Song")
+        self._artist_album(root, "Raha", "Solo", "Other")
+
+        merge_duplicate_artists(str(root))
+
+        assert (root / "Raha Derakhsh").exists()
+        assert (root / "Raha").exists()
+
+    def test_keeps_loser_when_name_conflicts_remain(self, tmp_dir):
+        """If winner already has the same filenames, do not rmtree the loser."""
+        root = Path(tmp_dir) / "out"
+        root.mkdir()
+        self._artist_album(root, "Artist", "2000 - A", "01 - X")
+        loser = self._artist_album(root, "Artist (feat)", "2000 - A", "01 - X")
+
+        merge_duplicate_artists(str(root))
+
+        # The loser's only file collides, so it is kept in place, not deleted.
+        assert loser.exists()
+
+
+class TestTitlePrefixStrip:
+    """A 'NN -' prefix in the title must not double the track number in the path."""
+
+    def _mp3_with_title(self, path: str, title: str, track: str) -> str:
+        from mutagen.id3 import ID3, TIT2, TPE1, TALB, TRCK
+        tags = ID3()
+        tags.add(TIT2(encoding=3, text=[title]))
+        tags.add(TPE1(encoding=3, text=["Artist"]))
+        tags.add(TALB(encoding=3, text=["Album"]))
+        tags.add(TRCK(encoding=3, text=[f"{track}/10"]))
+        tags.save(path)
+        frame = bytes([0xFF, 0xFB, 0x90, 0x00]) + b"\x00" * 413
+        with open(path, "ab") as f:
+            f.write(frame * 3)
+        return path
+
+    def test_destination_title_has_no_double_prefix(self, tmp_dir):
+        src = self._mp3_with_title(
+            str(Path(tmp_dir) / "03 - Song.mp3"), "03 - Song", "3"
+        )
+        dst = str(Path(tmp_dir) / "out")
+        stats = {"ok": 0, "skipped": 0, "errors": 0}
+        with patch("music_core.search_mb", return_value=None), \
+             patch("music_core.acoustid_lookup", return_value=None), \
+             patch("music_core.lastfm_genres", return_value=[]), \
+             patch("music_core.fetch_lyrics", return_value=(None, None)), \
+             patch("music_core.find_fpcalc", return_value=None):
+            meta, _src_label, status, dest = process_file(
+                src, dst, _opts(), stats
+            )
+        assert status == "ok"
+        # Filename is "03 - Song.mp3", never "03 - 03 - Song.mp3".
+        assert Path(dest).name == "03 - Song.mp3"
+        assert meta["title"] == "Song"
 
 
 class TestJournal:

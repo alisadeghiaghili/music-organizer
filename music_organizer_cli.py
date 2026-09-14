@@ -6,7 +6,7 @@ Usage: python music_organizer_cli.py [SOURCE] [OUTPUT] [OPTIONS]
 """
 
 import os, sys, argparse, threading
-from music_core import collect_mp3s, process_file, merge_duplicate_albums, fpcalc_status
+from music_core import collect_mp3s, process_file, merge_duplicate_albums, merge_duplicate_artists, fpcalc_status
 from fpcalc_installer import download_fpcalc
 
 # ── Pause/Resume state ────────────────────────────────────────────────────────
@@ -311,10 +311,12 @@ def run(src, dst, opts, verbose=False, do_merge=True):
     show_table(rows)
 
     if do_merge and not opts.get("dry_run"):
-        cprint("\n[cyan]Merging duplicate album folders\u2026[/cyan]" if HAS_RICH
-               else "\nMerging duplicate album folders\u2026")
-        merge_duplicate_albums(dst, log_cb=lambda m: cprint(
-            f" [dim]{m}[/dim]" if HAS_RICH else f" {m}"))
+        cprint("\n[cyan]Merging duplicate folders\u2026[/cyan]" if HAS_RICH
+               else "\nMerging duplicate folders\u2026")
+        _log = lambda m: cprint(f" [dim]{m}[/dim]" if HAS_RICH else f" {m}")
+        # Artists first (folds split artist folders), then albums.
+        merge_duplicate_artists(dst, log_cb=_log)
+        merge_duplicate_albums(dst, log_cb=_log)
 
     show_summary(stats, dst)
 

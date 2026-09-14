@@ -66,7 +66,9 @@ jobs:
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
-          files: MusicOrganizer-Windows.zip
+          files: |
+            MusicOrganizer-Windows.zip
+            dist/MusicOrganizer-GUI.exe
 
   macos:
     runs-on: macos-latest
@@ -119,4 +121,6 @@ jobs:
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
-          files: MusicOrganizer-macOS.zip
+          files: |
+            MusicOrganizer-macOS.zip
+            dist/MusicOrganizer-GUI
