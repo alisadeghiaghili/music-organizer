@@ -82,13 +82,15 @@ pip install -r requirements.txt
 ```
 
 To run the webview GUI from source (the primary frontend), also install its
-runtime (WebView2 on Windows, WKWebView on macOS):
+runtime (WebView2 on Windows, WKWebView on macOS, GTK3/WebKit2GTK on Linux):
 
 ```bash
 # Windows
 pip install pywebview pythonnet
 # macOS
 pip install pywebview   # pulls the PyObjC Cocoa/WebKit frameworks
+# Linux (needs the GTK3 + WebKit2GTK system libs, see below)
+pip install pyinstaller-hooks-contrib "pywebview[gtk]"
 ```
 
 The Tkinter fallback GUI and the CLI run on just `requirements.txt`.
@@ -177,13 +179,17 @@ python music_organizer_cli.py "D:/Music" "D:/Organized" \
 
 ## Build & releases
 
-Ready-to-run builds for **Windows** (`.exe`) and **macOS** (binary) are
+Ready-to-run builds for **Windows** (`.exe`), **macOS**, and **Linux** are
 published as release assets — grab the one for your platform from the
 [Releases page](https://github.com/alisadeghiaghili/music-organizer/releases).
-Each release ships the per-platform zip (GUI + CLI) **and** the standalone,
-unzipped GUI binary so you can run the GUI directly without extracting. The
-`fpcalc` fingerprinting binary is bundled into each build (and can still be
-re-downloaded on demand by the app).
+Each release ships the per-platform archive (GUI + CLI) **and** the standalone
+GUI binary so you can run the GUI directly without extracting. The `fpcalc`
+fingerprinting binary is bundled into each build (and can still be re-downloaded
+on demand by the app).
+
+> The Linux GUI uses GTK3 + WebKit2GTK, which are present on most desktop
+> distributions. On a minimal/server install you'll need the WebKit2GTK
+> libraries (e.g. `libwebkit2gtk-4.1` / `webkit2gtk-4.1` and `gtk+-3.0`).
 
 ### Build a Windows EXE locally
 
@@ -226,6 +232,28 @@ PyInstaller's Windows target produces `.exe`; on macOS it produces the app
 binaries shown above. The release workflow automates this, building on
 `macos-latest` — the artifact runs natively on Apple Silicon and, via
 Rosetta 2, on Intel Macs.
+
+### Build a Linux binary locally
+
+```bash
+# GTK3 + WebKit2GTK system libraries (already present on most desktop distros)
+sudo apt-get install -y gir1.2-gtk-3.0 gir1.2-webkit2-4.1 gir1.2-soup-3.0
+pip install mutagen rich pyinstaller pyinstaller-hooks-contrib "pywebview[gtk]"
+
+FPCALC_URL=$(python -c "import fpcalc_installer as f; print(f.get_download_url())")
+curl -L "$FPCALC_URL" -o /tmp/fpcalc.tgz
+tar -xzf /tmp/fpcalc.tgz -C /tmp
+FPCALC_BIN=$(find /tmp -type f -name fpcalc | head -1)
+chmod +x "$FPCALC_BIN"
+
+pyinstaller --noconfirm --clean --windowed --onefile \
+    --add-binary "$FPCALC_BIN:." --add-data "icon.png:." \
+    --hidden-import webview.platforms.gtk \
+    --collect-all gi --collect-all mutagen \
+    music_organizer_web.py
+pyinstaller --noconfirm --clean --console --onefile \
+    --add-binary "$FPCALC_BIN:." music_organizer_cli.py
+```
 
 ---
 
