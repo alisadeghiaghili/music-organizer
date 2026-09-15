@@ -307,6 +307,90 @@ class TestTitlePrefixStrip:
         assert meta["title"] == "Song"
 
 
+class TestCollisionNeverDropsData:
+    """Two DIFFERENT files that normalise to the same destination path must
+    both be preserved — the second gets a '(N)' filename, never a silent skip.
+
+    Regression: distinct tracks (e.g. two different songs of the same title, or
+    two artists whose names collapse under a loose online match) used to be
+    dropped as a false 'duplicate' the moment the first one claimed the
+    destination filename.
+    """
+
+    def _mk_mp3(self, path, payload=b"\x00", title="Song", track="1"):
+        from mutagen.id3 import ID3, TIT2, TPE1, TALB, TRCK
+        tags = ID3()
+        tags.add(TIT2(encoding=3, text=[title]))
+        tags.add(TPE1(encoding=3, text=["Artist"]))
+        tags.add(TALB(encoding=3, text=["Album"]))
+        tags.add(TRCK(encoding=3, text=[f"{track}/10"]))
+        tags.save(path)
+        frame = bytes([0xFF, 0xFB, 0x90, 0x00]) + payload * 413
+        with open(path, "ab") as f:
+            f.write(frame * 3)
+        return path
+
+    def _process(self, path, dst, opts=None):
+        from unittest.mock import patch
+        opts = opts or _opts()
+        stats = {"ok": 0, "skipped": 0, "errors": 0}
+        with patch("music_core.search_mb", return_value=None), \
+             patch("music_core.acoustid_lookup", return_value=None), \
+             patch("music_core.lastfm_genres", return_value=[]), \
+             patch("music_core.fetch_lyrics", return_value=(None, None)), \
+             patch("music_core.find_fpcalc", return_value=None):
+            meta, _src, status, dest = process_file(path, dst, opts, stats)
+        return status, dest, stats
+
+    def test_distinct_files_get_unique_names(self, tmp_dir):
+        dst = str(Path(tmp_dir) / "out")
+        # Two files with identical tags (→ identical destination) but different
+        # audio bytes: the Salar/Homayoun "two different songs, one filename" case.
+        a = self._mk_mp3(str(Path(tmp_dir) / "a.mp3"), payload=b"\x00")
+        b = self._mk_mp3(str(Path(tmp_dir) / "b.mp3"), payload=b"\x01")
+
+        status_a, dest_a, _ = self._process(a, dst)
+        status_b, dest_b, _ = self._process(b, dst)
+
+        assert status_a == "ok"
+        assert Path(dest_a).name == "01 - Song.mp3"
+        # The second distinct file is NOT dropped — it gets its own name.
+        assert status_b == "ok"
+        assert Path(dest_b).name == "01 - Song (1).mp3"
+        assert Path(dest_a).exists()
+        assert Path(dest_b).exists()
+        # Both distinct payloads survive on disk.
+        assert Path(dest_a).read_bytes() != Path(dest_b).read_bytes()
+
+    def test_true_duplicate_is_still_skipped(self, tmp_dir):
+        dst = str(Path(tmp_dir) / "out")
+        a = self._mk_mp3(str(Path(tmp_dir) / "a.mp3"), payload=b"\x00")
+
+        status_a, dest_a, _ = self._process(a, dst)
+        # Re-running the very same file must be idempotent (a real duplicate).
+        status_a2, dest_a2, stats = self._process(a, dst)
+
+        assert status_a == "ok"
+        assert status_a2 == "skipped"
+        assert dest_a2 == dest_a
+        assert stats["skipped"] == 1 and stats["ok"] == 0
+
+    def test_collision_resolves_past_occupied_slot(self, tmp_dir):
+        dst = str(Path(tmp_dir) / "out")
+        a = self._mk_mp3(str(Path(tmp_dir) / "a.mp3"), payload=b"\x00")
+        b = self._mk_mp3(str(Path(tmp_dir) / "b.mp3"), payload=b"\x01")
+        c = self._mk_mp3(str(Path(tmp_dir) / "c.mp3"), payload=b"\x02")
+
+        _, dest_a, _ = self._process(a, dst)
+        _, dest_b, _ = self._process(b, dst)
+        status_c, dest_c, _ = self._process(c, dst)
+
+        assert Path(dest_a).name == "01 - Song.mp3"
+        assert Path(dest_b).name == "01 - Song (1).mp3"
+        assert status_c == "ok"
+        assert Path(dest_c).name == "01 - Song (2).mp3"
+
+
 class TestJournal:
     """Filesystem mutations must be journaled when journal is enabled."""
 

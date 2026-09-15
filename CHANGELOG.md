@@ -4,6 +4,27 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.6.1] — 2026-09-14
+
+### Fixed
+
+- **No more silent data loss on filename collisions** — two *different* files
+  that normalise to the same output filename (e.g. two distinct songs of the
+  same title, or two artists folded together by a loose online match) are no
+  longer dropped as a false "duplicate". The second file is now written to its
+  own `Name (N).ext` path so every song survives. True duplicates (identical
+  bytes) are still skipped, and `--overwrite` still replaces the existing file.
+- **Per-file rows are now coloured while processing** — in the webview GUI the
+  row currently being organized is highlighted (amber) with a "⏳ processing…"
+  status, so you can see exactly which file is in flight. Previously the row
+  only updated after the file finished, so nothing looked "in progress".
+- **In-page header icon renders in the frozen build** — the app icon in the UI
+  header no longer depends on Pillow, which isn't bundled. The bundled PNG is
+  embedded as a data URI directly, so the logo shows in the released binaries
+  (it already worked in the OS window titlebar).
+
+---
+
 ## [2.6.0] — 2026-09-14
 
 ### Added

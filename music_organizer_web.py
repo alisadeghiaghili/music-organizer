@@ -13,7 +13,6 @@ lightweight, dependency-free fallback).
 """
 
 import base64
-import io
 import json
 import os
 import sys
@@ -51,22 +50,20 @@ def _window_icon_path():
     return None
 
 
-def _icon_data_uri(size: int = 44):
+def _icon_data_uri():
     """Header icon as an inline data URI (so it renders regardless of cwd),
-    or None if the asset is absent (header icon is then hidden)."""
-    try:
-        from PIL import Image
-    except ImportError:
-        return None
+    or None if the asset is absent (header icon is then hidden).
+
+    Encodes the bundled PNG directly — no image library needed, so it works in
+    the frozen build where Pillow is not installed. The CSS caps the render
+    size, so embedding the full-resolution asset is fine.
+    """
     p = _resource_dir() / "icon.png"
     if not p.exists():
         return None
     try:
-        im = Image.open(p).convert("RGBA").resize((size, size), Image.LANCZOS)
-        buf = io.BytesIO()
-        im.save(buf, format="PNG")
-        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-    except Exception:
+        return "data:image/png;base64," + base64.b64encode(p.read_bytes()).decode("ascii")
+    except OSError:
         return None
 
 
@@ -152,6 +149,22 @@ class Api:
                 self._rows.append(row)
             else:
                 self._rows[i] = row
+
+    def _set_row_status(self, path, status):
+        """Flip a row's status in place (used to mark the file currently being
+        processed). Preserves the metadata columns already shown from the scan
+        so the row doesn't flicker blank while a file is in flight."""
+        with self._lock:
+            i = self._row_index.get(path)
+            if i is None:
+                row = {"path": path, "file": os.path.basename(path),
+                       "artist": "", "album": "", "year": "", "trk": "",
+                       "title": "", "genre": "", "lyrics": "·", "art": "·"}
+                row["status"] = status
+                self._row_index[path] = len(self._rows)
+                self._rows.append(row)
+            else:
+                self._rows[i]["status"] = status
 
     # -- initial snapshot (called on page ready) --
     def init(self):
@@ -297,6 +310,7 @@ class Api:
                 self._pause.wait()
                 if self._stop.is_set():
                     break
+                self._set_row_status(path, "⏳ processing…")
                 try:
                     meta, source, status, dest = process_file(
                         path, dst, opts, stats, log_cb=self._logmsg)
@@ -450,7 +464,9 @@ HTML = r"""<!doctype html>
   td.num{width:34px}
   .mark.ok{color:var(--ok); font-weight:700}
   .st-ok{color:var(--ok)} .st-skip{color:var(--muted)} .st-err{color:var(--err)}
-  .st-dry{color:var(--accent)}
+  .st-dry{color:var(--accent)} .st-busy{color:var(--warn)}
+  tbody tr.busy{background:var(--pill-warn)}
+  tbody tr.busy td{border-top-color:var(--warn)}
   .logbox{height:130px; overflow:auto; background:var(--log-bg); color:var(--log-fg);
         border-radius:10px; padding:10px 12px; font-family:Consolas,monospace;
         font-size:12px; line-height:1.5}
@@ -575,6 +591,7 @@ function stClass(s){
   if(s.startsWith("✗")) return "st-err";
   if(s.startsWith("↷")) return "st-skip";
   if(s.startsWith("—")) return "st-dry";
+  if(s.startsWith("⏳")) return "st-busy";
   return "";
 }
 function mark(cls){ return `<span class="mark ${cls}">${"·"}</span>`; }
@@ -625,6 +642,7 @@ function render(s){
     c[8].innerHTML = r.art==="✓"   ? '<span class="mark ok">✓</span>' : '<span class="mark">·</span>';
     c[9].textContent = r.status;
     c[9].className = stClass(r.status);
+    tr.classList.toggle("busy", String(r.status).startsWith("⏳"));
   });
   // drop rows no longer present (e.g. after re-scan)
   for(const [p,tr] of [...rowMap]){
