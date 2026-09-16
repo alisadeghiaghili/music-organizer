@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.6.2] — 2026-09-16
+
+### Fixed
+
+- **Songs no longer vanish into a stray `[bracket]` artist folder.** Dirty
+  source tags — a bracketed artist (`[Salar Aghili]` vs `Salar Aghili`) and
+  site watermarks in the title (e.g. `[Royaye Man] ~[SevilMusic.Com]~`) — used
+  to split one artist's songs across two folders, so a song appeared to be
+  missing. Names are now normalised before filing: site watermarks
+  (`[SevilMusic.Com]`) are stripped, a name wrapped entirely in brackets is
+  unwrapped (`[Royaye Man]` → `Royaye Man`), and stray `~` separators are
+  dropped — while legitimate qualifiers like `(Remix)` and credits like
+  `feat. X` are preserved. The same clean names are used for the MusicBrainz
+  lookup, the scan view, the destination path, and the written tags.
+
+---
+
 ## [2.6.1] — 2026-09-14
 
 ### Fixed
