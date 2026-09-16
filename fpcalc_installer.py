@@ -5,6 +5,8 @@ import os, sys, platform, zipfile, tarfile, tempfile, shutil, threading, hashlib
 import urllib.request
 from pathlib import Path
 
+from music_organizer.__about__ import __version__
+
 # fpcalc is published as a GitHub release asset. The old acoustid.org/files
 # path is dead (404) and broke the in-app "Enable fingerprinting" download, so
 # all URLs are built from one verified base. Keep FPCALC_VERSION in sync with
@@ -82,7 +84,7 @@ def download_fpcalc(progress_cb=None, done_cb=None, error_cb=None):
                 )
 
             req = urllib.request.Request(
-                url, headers={"User-Agent": "MusicOrganizer/2.0"}
+                url, headers={"User-Agent": f"MusicOrganizer/{__version__}"}
             )
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total      = int(resp.headers.get("Content-Length", 0))

@@ -65,26 +65,45 @@ def _cache_cleanup():
         pass
 
 def _cache_get(key):
-    """Get cached API response if valid."""
+    """Get cached API response if valid.
+
+    The envelope is either ``{"type": "json", "response": ...}`` or
+    ``{"type": "binary", "data": <base64>}``. Binary payloads (cover art) are
+    base64-encoded so a single JSON file can hold both JSON API responses and
+    raw image bytes — the old code tried to ``json.dumps`` the bytes and the
+    whole store was silently dead.
+    """
     try:
         cache_file = _CACHE_DIR / f"{key}.json"
         if cache_file.exists():
             data = json.loads(cache_file.read_text(encoding="utf-8"))
             if time.time() - data.get("ts", 0) < _CACHE_TTL:
+                if data.get("type") == "binary":
+                    return base64.b64decode(data["data"])
                 return data.get("response")
     except Exception:
         pass
     return None
 
 def _cache_set(key, response):
-    """Cache an API response."""
+    """Cache an API response.
+
+    ``bytes``/``bytearray`` payloads (cover art) are base64-encoded into the
+    JSON envelope; everything else is stored as-is. Failures are non-fatal:
+    the cache is a best-effort speed-up, never a reason to break a run.
+    """
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache_file = _CACHE_DIR / f"{key}.json"
-        cache_file.write_text(
-            json.dumps({"ts": time.time(), "response": response}),
-            encoding="utf-8"
-        )
+        if isinstance(response, (bytes, bytearray)):
+            payload = {
+                "ts": time.time(),
+                "type": "binary",
+                "data": base64.b64encode(bytes(response)).decode("ascii"),
+            }
+        else:
+            payload = {"ts": time.time(), "type": "json", "response": response}
+        cache_file.write_text(json.dumps(payload), encoding="utf-8")
     except Exception:
         pass
 
@@ -107,15 +126,17 @@ def mb_get(endpoint, params, retries=1):
         return cached
 
     global _last_mb
+    rate_gap = float(_cfg.get("mb_rate_limit_seconds", 1.1))
+    timeout = int(_cfg.get("request_timeout", 10))
     for attempt in range(retries + 1):
         with _mb_lock:
-            gap = 1.1 - (time.time() - _last_mb)
+            gap = rate_gap - (time.time() - _last_mb)
             if gap > 0:
                 time.sleep(gap)
             url = f"{MB_BASE}/{endpoint}?" + urllib.parse.urlencode({**params, "fmt": "json"})
             req = urllib.request.Request(url, headers=HEADERS)
             try:
-                with urllib.request.urlopen(req, timeout=10) as r:
+                with urllib.request.urlopen(req, timeout=timeout) as r:
                     _last_mb = time.time()
                     data = json.loads(r.read().decode())
                     _cache_set(cache_key, data)
@@ -144,6 +165,34 @@ def _best_release(releases, desired_album=""):
     """
     best, year = select_best_release(releases, desired_album=desired_album or "")
     return best, year
+
+
+def _track_number_in_mediums(recording_id, mediums):
+    """Return this recording's track number within a release's media, or "".
+
+    The number is reported only when some medium lists the matched
+    ``recording_id``. It is never invented from the first track of the first
+    medium — that fabrication (``mediums[0].tracks[0]``) is exactly what the
+    MusicBrainz path stopped doing in v2.3.0, and the AcoustID path must not
+    reintroduce it.
+
+    Args:
+        recording_id: The matched recording's id (MusicBrainz recording id).
+        mediums: A release's ``mediums`` (AcoustID) or ``media`` (MusicBrainz)
+            list; each item carries ``tracks``/``track``.
+
+    Returns:
+        The track number as a string, or "" when it cannot be resolved.
+    """
+    if not recording_id or not mediums:
+        return ""
+    for medium in mediums:
+        for track in (medium.get("tracks") or medium.get("track") or []):
+            rec = track.get("recording") or {}
+            tid = rec.get("id") or track.get("recording_id") or ""
+            if tid == recording_id:
+                return str(track.get("number") or track.get("position") or "")
+    return ""
 
 
 def _lucene_escape(value: str) -> str:
@@ -237,7 +286,7 @@ def search_mb(artist, title, album=""):
         query_artist=artist or "",
         query_title=title or "",
         query_album=album or "",
-        min_score=DEFAULT_RECORDING_MIN_SCORE,
+        min_score=float(_cfg.get("recording_min_score", DEFAULT_RECORDING_MIN_SCORE)),
     )
     if rec is None:
         return None
@@ -260,17 +309,21 @@ def search_mb(artist, title, album=""):
 
     releases = rec.get("releases") or []
     if releases:
-        rel, year = select_best_release(releases, desired_album=album or "")
+        prefer_oldest = bool(_cfg.get("prefer_oldest_release", True))
+        rel, year = select_best_release(
+            releases, desired_album=album or "", prefer_oldest=prefer_oldest
+        )
         if rel is not None:
             release_score = 0.0
             from matching import score_release_for_library, should_accept_release
             release_score = score_release_for_library(
-                rel, desired_album=album or "", prefer_oldest=True
+                rel, desired_album=album or "", prefer_oldest=prefer_oldest
             )
             result["_release_score"] = release_score
             # Album/year/track only when the release clears the bar, or when
             # the user had no album tag (best-effort identification).
-            accept = should_accept_release(release_score, DEFAULT_ALBUM_MIN_SCORE)
+            album_bar = float(_cfg.get("album_min_score", DEFAULT_ALBUM_MIN_SCORE))
+            accept = should_accept_release(release_score, album_bar)
             if accept or not album:
                 result["release_id"] = rel.get("id", "")
                 result["album"] = rel.get("title", album)
@@ -328,7 +381,7 @@ def lastfm_genres(artist, title, api_key=None, retries=1):
         try:
             req = urllib.request.Request(
                 f"https://ws.audioscrobbler.com/2.0/?{params}", headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=8) as r:
+            with urllib.request.urlopen(req, timeout=int(_cfg.get("request_timeout", 8))) as r:
                 data = json.loads(r.read().decode())
             tags = data.get("track", {}).get("toptags", {}).get("tag", [])
             result = [t["name"].title() for t in tags[:4] if t.get("name")]
@@ -364,7 +417,7 @@ def fetch_lyrics(artist, title, album="", duration=0, retries=1):
     for attempt in range(retries + 1):
         try:
             req = urllib.request.Request(url, headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=10) as r:
+            with urllib.request.urlopen(req, timeout=int(_cfg.get("request_timeout", 10))) as r:
                 data = json.loads(r.read().decode())
             plain = data.get("plainLyrics")
             synced = data.get("syncedLyrics")
@@ -451,7 +504,7 @@ def fetch_cover_art(release_id, size="large", retries=1):
         ]:
             try:
                 req = urllib.request.Request(url, headers=HEADERS)
-                with urllib.request.urlopen(req, timeout=15) as r:
+                with urllib.request.urlopen(req, timeout=int(_cfg.get("request_timeout", 15))) as r:
                     data = r.read()
                     _cache_set(cache_key, data)
                     return data
@@ -532,7 +585,7 @@ def acoustid_lookup(filepath, api_key=None, retries=1):
     for attempt in range(retries + 1):
         try:
             req = urllib.request.Request(url, headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=10) as r:
+            with urllib.request.urlopen(req, timeout=int(_cfg.get("request_timeout", 10))) as r:
                 data = json.loads(r.read().decode())
                 break
         except Exception:
@@ -547,6 +600,7 @@ def acoustid_lookup(filepath, api_key=None, retries=1):
     if not results or not results[0].get("recordings"):
         return None
     rec    = results[0]["recordings"][0]
+    recording_id = rec.get("id", "")
     artist = rec.get("artists", [{}])[0].get("name", "") if rec.get("artists") else ""
     title  = rec.get("title", "")
     album, year, track, release_id = "", "", "", ""
@@ -556,9 +610,9 @@ def acoustid_lookup(filepath, api_key=None, retries=1):
             release_id = rel.get("id", "")
             album = rel.get("title", "")
             year  = str(yr) if yr != 9999 else ""
-            mediums = rel.get("mediums", [])
-            if mediums and mediums[0].get("tracks"):
-                track = str(mediums[0]["tracks"][0].get("position", ""))
+            # Track only when the matched recording id actually appears in a
+            # medium — never fabricated from the first track of the first medium.
+            track = _track_number_in_mediums(recording_id, rel.get("mediums", []))
     result = {
         "title": title, "artist": artist, "album": album,
         "year": year, "track": track, "disc": "",

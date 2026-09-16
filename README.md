@@ -279,9 +279,12 @@ set MUSIC_ORG_LASTFM_API_KEY=your_key_here
 |---|---|---|
 | `acoustid_api_key` | (built-in) | AcoustID API key for fingerprinting |
 | `lastfm_api_key` | (empty) | Last.fm API key for genre enrichment |
-| `user_agent` | `MusicOrganizer/2.2 (...)` | User-Agent for API requests |
+| `user_agent` | `MusicOrganizer/<version> (…)` | User-Agent for API requests — `<version>` tracks the release, so it always matches the running build |
 | `mb_rate_limit_seconds` | `1.1` | Minimum gap between MusicBrainz requests |
-| `output_template` | `{artist}/{year} - {album}/{track} - {title}.mp3` | Output path template |
+| `request_timeout` | `10` | Per-request network timeout (seconds) for all API calls |
+| `recording_min_score` | `0.82` | Minimum recording-match score (0–1) to accept a MusicBrainz candidate |
+| `album_min_score` | `55.0` | Minimum release score (0–100) to trust album/year/track |
+| `prefer_oldest_release` | `true` | Prefer the oldest release when matching (reverses to newest when `false`) |
 | `supported_extensions` | `.mp3,.flac,.ogg,.m4a,.wav,...` | Audio file extensions to process |
 
 ---

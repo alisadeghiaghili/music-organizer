@@ -12,6 +12,36 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import Config, get_config, DEFAULTS
+from music_organizer.__about__ import __version__
+
+
+class TestUserAgent:
+    """The User-Agent must be a single source of truth: it embeds the release
+    version from ``music_organizer.__about__.__version__`` so the API clients
+    never drift from the release (the old code hardcoded 2.3/2.0/2.2)."""
+
+    def test_user_agent_uses_release_version(self):
+        assert __version__ in DEFAULTS["user_agent"]
+
+    def test_user_agent_matches_about_version_exactly(self):
+        ua = DEFAULTS["user_agent"]
+        assert ua.startswith(f"MusicOrganizer/{__version__}")
+        assert "github.com/alisadeghiaghili/music-organizer" in ua
+
+    def test_no_stale_hardcoded_version(self):
+        # Regression guard: none of the old drifted versions may appear.
+        ua = DEFAULTS["user_agent"]
+        for stale in ("2.0", "2.2", "2.3"):
+            assert f"/{stale}" not in ua, f"user_agent still hardcodes {stale}"
+
+    def test_fpcalc_installer_user_agent_uses_release_version(self):
+        # The fpcalc downloader has its own UA header — it must track __version__
+        # too (it previously hardcoded MusicOrganizer/2.0).
+        import inspect
+        import fpcalc_installer
+        src = inspect.getsource(fpcalc_installer.download_fpcalc)
+        assert "__version__" in src
+        assert "MusicOrganizer/2.0" not in src
 
 
 class TestDefaults:

@@ -4,6 +4,41 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.6.3] — 2026-09-16
+
+### Fixed
+
+- **The disk cache was silently dead — cover art is cached again.** Binary
+  payloads (cover images) were passed straight to `json.dumps`, which raised
+  `TypeError` that the surrounding `except` swallowed. Every run therefore
+  re-fetched album art from the network instead of hitting the 24h cache. The
+  cache now stores a typed envelope: JSON responses as
+  `{"type": "json", "response": …}` and image bytes base64-encoded as
+  `{"type": "binary", "data": …}`, so a single JSON file holds both safely.
+
+- **The AcoustID (fingerprint) path no longer fabricates track numbers.** When
+  a fingerprint matched a release, the track number was taken from
+  `mediums[0].tracks[0]` even when that track was a completely different song —
+  the exact behaviour the MusicBrainz path stopped doing in 2.3.0. Track is now
+  resolved only when the *matched* recording id actually appears in a medium
+  (shared helper `_track_number_in_mediums`, which also handles the MusicBrainz
+  `media`/`track`/`recording.id` shape). When it can't be resolved, the field
+  stays empty rather than wrong.
+
+### Changed
+
+- **Config values that were declared but never read are now wired in.**
+  `recording_min_score`, `album_min_score`, `prefer_oldest_release`,
+  `mb_rate_limit_seconds`, and `request_timeout` all take effect now (previously
+  only hardcoded constants were used). Each keeps its previous value as the
+  default, so behaviour is unchanged unless you set the key.
+- **The User-Agent is now a single source of truth.** `config.py` and
+  `fpcalc_installer.py` build it from
+  `music_organizer.__about__.__version__` instead of hardcoded numbers that had
+  drifted (`2.3` / `2.0`) while the release was already `2.6.x`.
+
+---
+
 ## [2.6.2] — 2026-09-16
 
 ### Fixed

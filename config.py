@@ -9,8 +9,14 @@ import json
 import os
 from pathlib import Path
 
+from music_organizer.__about__ import __version__
+
 # ── Default configuration ──────────────────────────────────────────────────────
 
+# Single source of truth for the User-Agent: the version comes from
+# ``music_organizer.__about__.__version__`` so the API clients and the release
+# always report the same number (no more "2.3" in the code while the release is
+# 2.6.x).
 DEFAULTS = {
     # API keys
     # AcoustID key is public/shared — distributed with Chromaprint tools
@@ -19,7 +25,7 @@ DEFAULTS = {
     "discogs_token": "",
 
     # Network
-    "user_agent": "MusicOrganizer/2.3 (github.com/alisadeghiaghili/music-organizer)",
+    "user_agent": f"MusicOrganizer/{__version__} (github.com/alisadeghiaghili/music-organizer)",
     "mb_rate_limit_seconds": 1.1,
     "request_timeout": 10,
     "recording_min_score": 0.82,

@@ -3,15 +3,20 @@
 
 import os
 import sys
+import json
+import time
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 # Add parent dir to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import music_core
 from music_core import (
     safe, normalize_album_key, normalize_artist_key, folder_score, destination,
     collect_audio_files, collect_mp3s, read_tags,
     strip_track_prefix, merge_duplicate_artists, _clean_title,
+    _cache_get, _cache_set, _track_number_in_mediums, acoustid_lookup,
 )
 
 
@@ -266,3 +271,152 @@ class TestReadTags:
         tags = read_tags(sample_ogg)
         assert tags["title"] == "Ogg Song"
         assert tags["artist"] == "Ogg Artist"
+
+
+class TestCacheEnvelope:
+    """The disk cache must round-trip BOTH json responses and raw image bytes.
+
+    The old code passed bytes straight to ``json.dumps`` (TypeError → swallowed),
+    so the entire store was silently dead — cover art was fetched from the
+    network every single run. These tests pin the typed base64 envelope.
+    """
+
+    def test_bytes_round_trip(self, tmp_path, monkeypatch):
+        # Redirect the cache dir so we don't touch the real one.
+        import music_core as mc
+        monkeypatch.setattr(mc, "_CACHE_DIR", Path(tmp_path))
+
+        art = b"\xff\xd8\xff\xe0" + bytes(range(256)) * 7  # binary, non-UTF8
+        _cache_set("caa_test", art)
+        assert _cache_get("caa_test") == art
+
+    def test_json_round_trip(self, tmp_path, monkeypatch):
+        import music_core as mc
+        monkeypatch.setattr(mc, "_CACHE_DIR", Path(tmp_path))
+
+        payload = {"release_id": "abc", "count": 3, "tags": ["rock"]}
+        _cache_set("mb_test", payload)
+        assert _cache_get("mb_test") == payload
+
+    def test_stored_payload_is_a_typed_json_envelope(self, tmp_path, monkeypatch):
+        import music_core as mc
+        monkeypatch.setattr(mc, "_CACHE_DIR", Path(tmp_path))
+
+        _cache_set("k", b"cover-art-bytes")
+        raw = json.loads((Path(tmp_path) / "k.json").read_text(encoding="utf-8"))
+        assert raw["type"] == "binary"
+        import base64
+        assert base64.b64decode(raw["data"]) == b"cover-art-bytes"
+
+    def test_expired_returns_none(self, tmp_path, monkeypatch):
+        import music_core as mc
+        monkeypatch.setattr(mc, "_CACHE_DIR", Path(tmp_path))
+
+        _cache_set("old", {"a": 1})
+        file = Path(tmp_path) / "old.json"
+        # Backdate the entry past the TTL.
+        data = json.loads(file.read_text(encoding="utf-8"))
+        data["ts"] = time.time() - (mc._CACHE_TTL + 10)
+        file.write_text(json.dumps(data), encoding="utf-8")
+        assert _cache_get("old") is None
+
+
+class TestTrackNumberInMediums:
+    """The shared no-fabrication helper used by the AcoustID path."""
+
+    def test_returns_number_when_recording_present(self):
+        mediums = [{"tracks": [
+            {"recording": {"id": "OTHER"}, "number": "1"},
+            {"recording": {"id": "r1"}, "number": "7"},
+        ]}]
+        assert _track_number_in_mediums("r1", mediums) == "7"
+
+    def test_empty_when_recording_absent(self):
+        # The matched recording is not on this medium → must not invent "1".
+        mediums = [{"tracks": [
+            {"recording": {"id": "OTHER"}, "number": "1"},
+        ]}]
+        assert _track_number_in_mediums("r1", mediums) == ""
+
+    def test_empty_when_no_mediums(self):
+        assert _track_number_in_mediums("r1", []) == ""
+        assert _track_number_in_mediums("r1", None) == ""
+
+    def test_empty_when_no_recording_id(self):
+        mediums = [{"tracks": [{"recording": {"id": "r1"}, "number": "3"}]}]
+        assert _track_number_in_mediums("", mediums) == ""
+
+    def test_musicbrainz_media_shape(self):
+        # MusicBrainz uses "media"/"track"/"recording.id"/"number"; the helper
+        # must handle that shape too (single source for both API dialects).
+        media = [{"track": [
+            {"recording": {"id": "r9"}, "number": "12"},
+        ]}]
+        assert _track_number_in_mediums("r9", media) == "12"
+
+
+class TestAcoustidLookupNoFabrication:
+    """The fingerprint path must resolve track only from the matched recording,
+    never from the first track of the first medium (the old bug)."""
+
+    def _run(self, acoustid_payload, tmp_path, monkeypatch):
+        import music_core as mc
+        monkeypatch.setattr(mc, "_CACHE_DIR", Path(tmp_path))
+
+        run = MagicMock(
+            stdout=json.dumps({"fingerprint": "FP1", "duration": 123}),
+            returncode=0,
+        )
+        fake_resp = MagicMock()
+        fake_resp.read.return_value = json.dumps(acoustid_payload).encode()
+        fake_resp.__enter__.return_value = fake_resp
+        fake_resp.__exit__.return_value = False
+
+        # All three mocks must stay active for the whole acoustid_lookup call.
+        with patch("music_core.find_fpcalc", return_value="/fake/fpcalc"), \
+             patch("subprocess.run", return_value=run), \
+             patch("urllib.request.urlopen", return_value=fake_resp):
+            return acoustid_lookup("dummy.mp3", api_key="k")
+
+    def _payload(self, recording_id, mediums):
+        return {
+            "status": "OK",
+            "results": [{
+                "recordings": [{
+                    "id": recording_id,
+                    "title": "Song",
+                    "artists": [{"name": "Artist"}],
+                    "releases": [{
+                        "id": "rel1",
+                        "title": "Album",
+                        "date": "2000-01-01",
+                        "primary-type": "Album",
+                        "secondary-types": [],
+                        "mediums": mediums,
+                    }],
+                }],
+            }],
+        }
+
+    def test_track_resolved_from_matched_recording(self, tmp_path, monkeypatch):
+        mediums = [{"tracks": [
+            {"recording_id": "other", "number": "1"},
+            {"recording_id": "r1", "number": "5"},
+        ]}]
+        result = self._run(self._payload("r1", mediums), tmp_path, monkeypatch)
+        assert result is not None
+        assert result["title"] == "Song"
+        assert result["track"] == "5"
+
+    def test_track_not_fabricated_when_recording_missing(self, tmp_path, monkeypatch):
+        # Only an unrelated track exists → track must stay empty, not "1".
+        mediums = [{"tracks": [
+            {"recording_id": "other", "number": "1"},
+        ]}]
+        result = self._run(self._payload("r1", mediums), tmp_path, monkeypatch)
+        assert result is not None
+        assert result["track"] == ""
+
+    def test_empty_when_no_results(self, tmp_path, monkeypatch):
+        result = self._run({"status": "OK", "results": []}, tmp_path, monkeypatch)
+        assert result is None
