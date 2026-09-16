@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import music_core
 from music_core import search_mb
 
 
@@ -166,3 +167,83 @@ class TestSearchMb:
 
         assert result is not None
         assert result["title"] == "Comfortably Numb"
+
+
+def _rel(id_, title, date, media=None, ptype="Album", sec=None):
+    return {
+        "id": id_,
+        "title": title,
+        "date": date,
+        "primary-type": ptype,
+        "secondary-types": sec or [],
+        "media": media if media is not None else [],
+    }
+
+
+class TestConfigWiring:
+    """The config keys that used to be declared-but-never-read must now actually
+    change behaviour. Each test pushes a key past its default and checks the
+    outcome flips — the flip only happens if the value is read from ``_cfg``.
+    """
+
+    def test_recording_min_score_is_read(self):
+        rec = _rec("r1", "The Wall", "Pink Floyd",
+                   [_rel("rel1", "The Wall", "1979-11-30")])
+
+        def fake_mb_get(endpoint, params, retries=1):
+            if endpoint == "recording":
+                return {"recordings": [rec]}
+            return None
+
+        # Impossibly high bar → even a strong match is rejected. This only
+        # happens if search_mb reads recording_min_score from config.
+        with patch.object(music_core._cfg, "get",
+                          side_effect=lambda k, d=None: 0.9999 if k == "recording_min_score" else d), \
+             patch("music_core.mb_get", side_effect=fake_mb_get):
+            assert search_mb("Pink Floyd", "The Wall", "The Wall") is None
+
+    def test_prefer_oldest_release_toggles_selection(self):
+        def make_rec():
+            return _rec(
+                "r1", "The Wall", "Pink Floyd",
+                [_rel("new", "The Wall", "2011-09-26"),
+                 _rel("old", "The Wall", "1990-01-01")],
+            )
+
+        def fake_mb_get(endpoint, params, retries=1):
+            if endpoint == "recording":
+                return {"recordings": [make_rec()]}
+            return None
+
+        def run(prefer_oldest):
+            with patch.object(music_core._cfg, "get",
+                              side_effect=lambda k, d=None:
+                              prefer_oldest if k == "prefer_oldest_release" else d), \
+                 patch("music_core.mb_get", side_effect=fake_mb_get):
+                return search_mb("Pink Floyd", "The Wall", "")
+
+        assert run(True)["release_id"] == "old"
+        assert run(False)["release_id"] == "new"
+
+    def test_album_min_score_is_read(self):
+        # A release whose score sits below the default 55.0 bar: with the
+        # default the album/year stay withheld (album tag is set); lowering the
+        # bar must populate them.
+        rec = _rec("r1", "Some Tune", "Band",
+                   [_rel("rel1", "Totally Different Title", "1995-05-05")])
+
+        def fake_mb_get(endpoint, params, retries=1):
+            if endpoint == "recording":
+                return {"recordings": [rec]}
+            return None
+
+        def run(album_bar):
+            with patch.object(music_core._cfg, "get",
+                              side_effect=lambda k, d=None:
+                              album_bar if k == "album_min_score" else d), \
+                 patch("music_core.mb_get", side_effect=fake_mb_get):
+                return search_mb("Band", "Some Tune", "Some Tune Album")
+
+        below_default = run(0.0)  # accept everything
+        assert below_default is not None
+        assert below_default["year"] == "1995"
