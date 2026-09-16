@@ -449,10 +449,11 @@ class TestDirtyTagFiling:
         assert P(dest_b).parent.parent.name == "Salar Aghili"
         assert P(dest_a).parent.parent == P(dest_b).parent.parent
 
-        # Clean names: no brackets, tildes, or site watermarks anywhere in the path.
+        # Clean names: no brackets, tildes, or site watermarks in the path the
+        # product builds (under the destination root). The temp-dir prefix is
+        # not under our control (e.g. a Windows 8.3 short name like RUNNER~1).
         for d in (dest_a, dest_b):
-            parts = P(d).parts
-            for part in parts:
+            for part in P(d).relative_to(P(dst)).parts:
                 assert "[" not in part and "]" not in part, f"bracket left in {part!r}"
                 assert "~" not in part, f"tilde left in {part!r}"
                 assert "SevilMusic" not in part, f"watermark left in {part!r}"
