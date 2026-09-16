@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from music_core import (
     safe, normalize_album_key, normalize_artist_key, folder_score, destination,
     collect_audio_files, collect_mp3s, read_tags,
-    strip_track_prefix, merge_duplicate_artists,
+    strip_track_prefix, merge_duplicate_artists, _clean_title,
 )
 
 
@@ -153,6 +153,43 @@ class TestDestination:
         }
         result = destination(tmp_dir, meta)
         assert result.name.startswith("05 -")
+
+
+class TestCleanTitle:
+    """_clean_title strips aggregator watermarks / stray brackets but keeps real
+    names and legit parentheticals."""
+
+    def test_removes_domain_watermark_bracket(self):
+        assert _clean_title("Khor Ava [SevilMusic.Com]") == "Khor Ava"
+
+    def test_unwraps_name_and_removes_watermark(self):
+        assert _clean_title("[Royaye Man] ~[SevilMusic.Com]~") == "Royaye Man"
+
+    def test_unwraps_bracketed_artist(self):
+        assert _clean_title("[Salar Aghili]") == "Salar Aghili"
+
+    def test_drops_stray_tildes(self):
+        # '~' separators are removed and spaces collapsed.
+        assert _clean_title("Song ~ y") == "Song y"
+
+    def test_keeps_non_wrapped_qualifier(self):
+        # A bracket that is NOT the whole value (a qualifier) is left alone.
+        assert _clean_title("Song (Remix)") == "Song (Remix)"
+
+    def test_keeps_clean_value(self):
+        assert _clean_title("Khor Ava") == "Khor Ava"
+
+    def test_preserves_feat_credit_and_edition(self):
+        # 'feat. X' (dot + space) and '(Remix)' are not watermarks.
+        assert _clean_title("Artist feat. X") == "Artist feat. X"
+        assert _clean_title("Song (Remix)") == "Song (Remix)"
+
+    def test_never_empties_noise_only_input(self):
+        assert _clean_title("[SevilMusic.Com]") == "[SevilMusic.Com]"
+
+    def test_empty_passes_through(self):
+        assert _clean_title("") == ""
+        assert _clean_title(None) is None
 
 
 class TestCollectAudioFiles:

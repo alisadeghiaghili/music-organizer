@@ -391,6 +391,81 @@ class TestCollisionNeverDropsData:
         assert Path(dest_c).name == "01 - Song (2).mp3"
 
 
+class TestDirtyTagFiling:
+    """Dirty source tags (bracketed artist, site watermark, stray '~') must not
+    split one artist into a separate ``[bracket]`` folder or leave watermarks in
+    the destination filenames.
+
+    Regression: two distinct songs of the same artist, e.g.
+    ``Salar Aghili - Khor Ava [SevilMusic].mp3`` (artist ``Salar Aghili``) and
+    ``Salar Aghili - Royaye Man [SevilMusic].mp3`` (artist ``[Salar Aghili]``,
+    title ``[Royaye Man] ~[SevilMusic.Com]~``), were filed under two different
+    artist folders because the brackets created ``[Salar Aghili]`` — so one song
+    appeared to vanish. Both must now land under a single clean ``Salar Aghili``
+    folder.
+    """
+
+    def _mk_mp3(self, path, *, artist, title, payload=b"\x00"):
+        from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC
+        tags = ID3()
+        tags.add(TIT2(encoding=3, text=[title]))
+        tags.add(TPE1(encoding=3, text=[artist]))
+        tags.add(TDRC(encoding=3, text=["2020"]))
+        tags.save(path)
+        frame = bytes([0xFF, 0xFB, 0x90, 0x00]) + payload * 413
+        with open(path, "ab") as f:
+            f.write(frame * 3)
+        return path
+
+    def _process(self, path, dst):
+        from unittest.mock import patch
+        opts = dict(copy=True, acoustid=False, write_tags=True, overwrite=False,
+                    dry_run=True, fetch_art=False, fetch_lyrics=False,
+                    overwrite_art=False, journal=False)
+        stats = {"ok": 0, "skipped": 0, "errors": 0}
+        with patch("music_core.search_mb", return_value=None), \
+             patch("music_core.acoustid_lookup", return_value=None), \
+             patch("music_core.lastfm_genres", return_value=[]), \
+             patch("music_core.fetch_lyrics", return_value=(None, None)), \
+             patch("music_core.find_fpcalc", return_value=None):
+            meta, source, status, dest = process_file(path, dst, opts, stats)
+        return meta, dest
+
+    def test_dirty_tags_file_under_one_clean_artist_folder(self, tmp_dir):
+        from pathlib import Path as P
+        dst = str(P(tmp_dir) / "out")
+        a = self._mk_mp3(str(P(tmp_dir) / "a.mp3"),
+                         artist="Salar Aghili",
+                         title="Khor Ava [SevilMusic.Com]", payload=b"\x00")
+        b = self._mk_mp3(str(P(tmp_dir) / "b.mp3"),
+                         artist="[Salar Aghili]",
+                         title="[Royaye Man] ~[SevilMusic.Com]~", payload=b"\x01")
+
+        meta_a, dest_a = self._process(a, dst)
+        meta_b, dest_b = self._process(b, dst)
+
+        # Both must resolve to the same, unbracketed artist folder.
+        assert P(dest_a).parent.parent.name == "Salar Aghili"
+        assert P(dest_b).parent.parent.name == "Salar Aghili"
+        assert P(dest_a).parent.parent == P(dest_b).parent.parent
+
+        # Clean names: no brackets, tildes, or site watermarks anywhere in the path.
+        for d in (dest_a, dest_b):
+            parts = P(d).parts
+            for part in parts:
+                assert "[" not in part and "]" not in part, f"bracket left in {part!r}"
+                assert "~" not in part, f"tilde left in {part!r}"
+                assert "SevilMusic" not in part, f"watermark left in {part!r}"
+        assert P(dest_a).name == "Khor Ava.mp3"
+        assert P(dest_b).name == "Royaye Man.mp3"
+
+        # The returned meta (used for tag-writing / status) is clean too.
+        assert meta_a["artist"] == "Salar Aghili"
+        assert meta_b["artist"] == "Salar Aghili"
+        assert meta_a["title"] == "Khor Ava"
+        assert meta_b["title"] == "Royaye Man"
+
+
 class TestJournal:
     """Filesystem mutations must be journaled when journal is enabled."""
 

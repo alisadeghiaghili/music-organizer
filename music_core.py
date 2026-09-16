@@ -641,7 +641,16 @@ def _clean_meta(meta):
     ``"NN - Title"`` output filename and clutters the Title column. Strip it at
     the single read choke point so the scan view, organize view, CLI preview,
     and MusicBrainz queries all see the clean title.
+
+    Also strip aggregator watermarks and stray brackets from the title/artist/
+    album names (e.g. ``[Salar Aghili]`` → ``Salar Aghili``,
+    ``[Royaye Man] ~[x.com]~`` → ``Royaye Man``) so dirty source tags don't split
+    one artist into a second ``[bracket]`` folder and misfile its songs.
     """
+    for key in ("title", "artist", "album"):
+        v = meta.get(key)
+        if v:
+            meta[key] = _clean_title(v)
     if meta.get("title"):
         meta["title"] = strip_track_prefix(meta["title"])
     return meta
@@ -1180,6 +1189,47 @@ def strip_track_prefix(title):
     return t.strip() or title
 
 
+# Bracket/paren groups that look like a domain / site / URL watermark, e.g.
+# "[SevilMusic.Com]" or "(www.x.com)". A dot followed by >=2 word chars marks
+# it as a source label (not part of the name). Abbreviation dots like "feat. X"
+# (dot followed by a space) do NOT match, so credits are preserved.
+_WATERMARK_BRACKET_RE = re.compile(
+    r"[\(\[\{][^\(\)\[\]\{]*\.\w{2,}[^\(\)\[\]\{]*[\)\]\}]"
+)
+# A value that is a *single* bracket/paren group wrapping its whole content,
+# e.g. "[Royaye Man]" or "[Salar Aghili]". Used to unwrap a fully-wrapped name
+# without touching legit trailing qualifiers such as "Song (Remix)".
+_WRAPPED_NAME_RE = re.compile(r"[\(\[\{]([^\(\)\[\]\{]+)[\)\]\}]")
+
+
+def _clean_title(value):
+    """Normalize a messy aggregator title/artist/album into a clean value.
+
+    Rips from file sites carry watermarks and wrappers, e.g.
+    ``Khor Ava [SevilMusic.Com]`` or ``[Royaye Man] ~[SevilMusic.Com]~``, and
+    an artist tag like ``[Salar Aghili]``. For filing we keep the bare name:
+      * drop bracket/paren groups that look like a domain/watermark
+        (a dot + letters, i.e. a site label);
+      * unwrap a name that is *entirely* wrapped in one bracket/paren group
+        (``[Royaye Man]`` → ``Royaye Man``) — but leave legit qualifiers like
+        ``Song (Remix)`` and credits like ``feat. X`` intact;
+      * drop stray ``~`` separator characters and collapse whitespace.
+
+    A value that is *only* noise is returned unchanged so it never becomes
+    empty. Idempotent on already-clean values.
+    """
+    if not value:
+        return value
+    t = str(value)
+    t = _WATERMARK_BRACKET_RE.sub(" ", t)
+    t = t.replace("~", " ")
+    t = re.sub(r"\s+", " ", t).strip(" \t-")
+    m = _WRAPPED_NAME_RE.fullmatch(t)
+    if m:
+        t = re.sub(r"\s+", " ", m.group(1)).strip(" \t-")
+    return t or str(value)
+
+
 def safe(name, maxlen=None):
     if maxlen is None:
         maxlen = _cfg["filename_max_length"]
@@ -1197,12 +1247,12 @@ def folder_score(folder_name):
     return 1 if re.match(r'^\d{4}\s*-\s*', folder_name) else 0
 
 def destination(root, meta):
-    artist = safe(meta.get("artist") or "Unknown Artist")
-    album  = safe(meta.get("album")  or "Unknown Album")
+    artist = safe(_clean_title(meta.get("artist")) or "Unknown Artist")
+    album  = safe(_clean_title(meta.get("album"))  or "Unknown Album")
     year   = meta.get("year", "")
     folder = f"{year} - {album}" if year else album
     track  = meta.get("track", "").zfill(2) if meta.get("track") else ""
-    title  = safe(meta.get("title")  or "Unknown Title")
+    title  = safe(_clean_title(meta.get("title"))  or "Unknown Title")
     ext    = meta.get("_extension", ".mp3")
     fname  = f"{track} - {title}{ext}" if track else f"{title}{ext}"
     return Path(root) / artist / folder / fname
@@ -1596,6 +1646,13 @@ def process_file(path, dst, opts, stats, log_cb=None):
     # The real album position is the TRACK tag, so strip the redundant prefix —
     # the output filename is always "TRACK - Title", never "NN - NN - Title".
     meta["title"] = strip_track_prefix(meta["title"])
+    # Strip aggregator watermarks / brackets from the names used for filing
+    # (e.g. "[Salar Aghili]" -> "Salar Aghili", "[Royaye Man] ~[x.com]~" ->
+    # "Royaye Man") so a stray bracket doesn't split one artist into a second
+    # folder and the file doesn't get misfiled or lost.
+    meta["title"]  = _clean_title(meta["title"])
+    meta["artist"] = _clean_title(meta["artist"])
+    meta["album"]  = _clean_title(meta["album"])
 
     # 4. Lyrics
     if opts.get("fetch_lyrics", True) and meta.get("artist") and meta.get("title"):
